@@ -1,10 +1,11 @@
-/tmp/airflow_provider_weaviate-0.0.1-py3-none-any.whl
+apache-airflow-providers-weaviate==1.0.0
 apache-airflow-providers-github==2.3.1
 apache-airflow-providers-slack==7.3.2
 streamlit==1.25.0
 html2text==2020.1.16
 pypandoc==1.11
-langchain==0.0.329
+langchain==0.0.333
+langsmith==0.0.65
 markdownify==0.11.6
 stackapi==0.2.0
 protobuf==3.20.2
@@ -13,4 +14,4 @@ openai==0.28.1
 bs4==0.0.1
 lxml==4.9.3
 tiktoken==0.5.1
-firebase-admin
+firebase-admin==6.2.0

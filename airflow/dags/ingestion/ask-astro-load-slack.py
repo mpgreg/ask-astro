@@ -8,7 +8,7 @@ from airflow.decorators import dag, task
 
 ask_astro_env = os.environ.get("ASK_ASTRO_ENV", "")
 
-_WEAVIATE_CONN_ID = f"weaviate_{ask_astro_env}"
+_WEAVIATE_CONN_ID = os.environ.get("WEAVIATE_CONN_ID", f"weaviate_{ask_astro_env}")
 WEAVIATE_CLASS = os.environ.get("WEAVIATE_CLASS", "DocsProd")
 slack_channel_sources = [
     {
@@ -20,8 +20,18 @@ slack_channel_sources = [
     }
 ]
 
+default_args = {"retries": 3, "retry_delay": 30}
 
-@dag(schedule_interval="0 5 * * *", start_date=datetime(2023, 9, 27), catchup=False, is_paused_upon_creation=True)
+schedule_interval = "0 5 * * *" if ask_astro_env == "prod" else None
+
+
+@dag(
+    schedule_interval=schedule_interval,
+    start_date=datetime(2023, 9, 27),
+    catchup=False,
+    is_paused_upon_creation=True,
+    default_args=default_args,
+)
 def ask_astro_load_slack():
     """
     This DAG performs incremental load for any new slack threads.  The slack archive is a point-in-time capture.  This
@@ -29,16 +39,22 @@ def ask_astro_load_slack():
     weaviate_import decorator any existing documents that have been updated will be removed and re-added.
     """
 
-    slack_docs = task(slack.extract_slack, retries=3).expand(source=slack_channel_sources)
+    slack_docs = task(slack.extract_slack).expand(source=slack_channel_sources)
 
     split_md_docs = task(split.split_markdown).expand(dfs=[slack_docs])
 
-    task.weaviate_import(
-        ingest.import_upsert_data,
-        weaviate_conn_id=_WEAVIATE_CONN_ID,
-        retries=10,
-        retry_delay=30,
-    ).partial(class_name=WEAVIATE_CLASS, primary_key="docLink").expand(dfs=[split_md_docs])
+    _import_data = (
+        task(ingest.import_data, retries=10)
+        .partial(
+            weaviate_conn_id=_WEAVIATE_CONN_ID,
+            class_name=WEAVIATE_CLASS,
+            existing="upsert",
+            doc_key="docLink",
+            batch_params={"batch_size": 1000},
+            verbose=True,
+        )
+        .expand(dfs=[split_md_docs])
+    )
 
 
 ask_astro_load_slack()

@@ -86,6 +86,9 @@ def extract_slack_archive(source: dict) -> pd.DataFrame:
     )
     df["docSource"] = source["channel_name"]
 
+    df.drop_duplicates(subset=["docLink"], keep="first", inplace=True)
+    df.reset_index(drop=True, inplace=True)
+
     # column order matters for uuid generation
     df = df[["docSource", "sha", "content", "docLink"]]
 
@@ -171,6 +174,9 @@ def extract_slack(source: dict) -> pd.DataFrame:
         lambda x: slack_link_format.format(team_id=source["team_id"], channel_id=source["channel_id"], ts=str(x))
     )
     df["docSource"] = source["channel_name"]
+
+    df.drop_duplicates(subset=["docLink"], keep="first", inplace=True)
+    df.reset_index(drop=True, inplace=True)
 
     # column order matters for uuid generation
     df = df[["docSource", "sha", "content", "docLink"]]

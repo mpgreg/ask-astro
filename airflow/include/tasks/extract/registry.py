@@ -94,6 +94,9 @@ def extract_astro_registry_dags() -> list[pd.DataFrame]:
 
     df["content"] = df["githubRawSourceUrl"].apply(lambda x: requests.get(x).text)
 
+    df.drop_duplicates(subset=["docLink"], keep="first", inplace=True)
+    df.reset_index(drop=True, inplace=True)
+
     # column order matters for uuid generation
     df = df[["docSource", "sha", "content", "docLink"]]
 

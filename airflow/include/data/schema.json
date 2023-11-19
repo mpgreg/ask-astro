@@ -1,7 +1,7 @@
 {
     "classes": [
         {
-            "class": "Docs",
+            "class": "DocsLocal",
             "description": "Document from github or stackoverflow",
             "vectorizer": "text2vec-openai",
             "moduleConfig": {
@@ -54,6 +54,7 @@
                     "name": "content",
                     "description": "Document content",
                     "dataType": ["text"],
+                    "tokenization": "word",
                     "moduleConfig": {
                         "text2vec-openai": {
                             "skip": "False",
