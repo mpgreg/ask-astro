@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import re
 import urllib.parse
 from time import sleep
-
 import requests
 from bs4 import BeautifulSoup
 
 
-def get_links(url: str, exclude_docs: list) -> set:
+def get_links(url: str, url_base: str) -> set:
     """
     Given a HTML url this function scrapes the page for any HTML links (<a> tags) and returns a set of links which:
     a) starts with the same base (ie. scheme + netloc)
@@ -21,32 +21,34 @@ def get_links(url: str, exclude_docs: list) -> set:
     data = response.text
     soup = BeautifulSoup(data, "lxml")
 
-    url_parts = urllib.parse.urlsplit(url)
-    url_base = f"{url_parts.scheme}://{url_parts.netloc}"
-
     links = set()
     for link in soup.find_all("a"):
         link_url = link.get("href")
 
-        if link_url.endswith(".html"):
-            if link_url.startswith(url_base) and not any(substring in link_url for substring in exclude_docs):
-                links.add(link_url)
-            elif not link_url.startswith("http"):
-                absolute_url = urllib.parse.urljoin(url, link_url)
-                if not any(substring in absolute_url for substring in exclude_docs):
-                    links.add(absolute_url)
+        if link_url.startswith(url_base):
+            links.add(link_url)
+        elif not link_url.startswith(("http", "#")) and link_url != '/':
+            absolute_url = urllib.parse.urljoin(url, link_url)
+            links.add(absolute_url.split("#")[0])
+
+    links = {link for link in links if not link.endswith(('.xml'))}
+    links = {link.split('?')[0] for link in links}
+    links = {link.split('#')[0] for link in links}
+    links = {link for link in links if link.startswith(url_base)}
 
     return links
 
 
-def get_all_links(url: str, all_links: set, exclude_docs: list):
+def get_all_links(url: str, url_base: str, all_links: set):
     """
     This is a recursive function to find all the sub-pages of a webpage.  Given a starting URL the function
     recurses through all child links referenced in the page.
 
     The all_links set is updated in recursion so no return set is passed.
     """
-    links = get_links(url=url, exclude_docs=exclude_docs)
+    
+    links = get_links(url=url, url_base=url_base)
+
     for link in links:
         # check if the linked page actually exists and get the redirect which is hopefully unique
 
@@ -57,9 +59,17 @@ def get_all_links(url: str, all_links: set, exclude_docs: list):
                 print(redirect_url)
                 all_links.add(redirect_url)
                 try:
-                    get_all_links(url=redirect_url, all_links=all_links, exclude_docs=exclude_docs)
+                    get_all_links(
+                        url=redirect_url, 
+                        url_base=url_base, 
+                        all_links=all_links
+                        )
                 except Exception as e:
                     print(e)
                     print("Retrying")
                     sleep(5)
-                    get_all_links(url=redirect_url, all_links=all_links, exclude_docs=exclude_docs)
+                    get_all_links(
+                        url=redirect_url, 
+                        url_base=url_base,
+                        all_links=all_links
+                        )

@@ -59,12 +59,9 @@ def extract_astro_blogs(blog_cutoff_date: datetime.date) -> list[pd.DataFrame]:
     df["content"] = df["content"].apply(lambda x: BeautifulSoup(x, "lxml").find(class_="prose").get_text())
     df["content"] = df.apply(lambda x: blog_format.format(title=x.title, content=x.content), axis=1)
 
-    df["sha"] = df["content"].apply(generate_uuid5)
-    df["docSource"] = "astro blog"
     df.drop_duplicates(subset=["docLink"], keep="first", inplace=True)
     df.reset_index(drop=True, inplace=True)
 
-    # column order matters for uuid generation
-    df = df[["docSource", "sha", "content", "docLink"]]
+    df = df[["content", "docLink"]]
 
     return [df]

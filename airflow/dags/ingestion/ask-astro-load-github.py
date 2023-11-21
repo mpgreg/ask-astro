@@ -14,8 +14,6 @@ _GITHUB_CONN_ID = "github_ro"
 WEAVIATE_CLASS = os.environ.get("WEAVIATE_CLASS", "DocsProd")
 
 markdown_docs_sources = [
-    {"doc_dir": "learn", "repo_base": "astronomer/docs"},
-    {"doc_dir": "astro", "repo_base": "astronomer/docs"},
     {"doc_dir": "", "repo_base": "OpenLineage/docs"},
     {"doc_dir": "", "repo_base": "OpenLineage/OpenLineage"},
 ]

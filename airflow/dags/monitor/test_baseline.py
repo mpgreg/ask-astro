@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 from include.tasks import ingest, split
-from include.tasks.utils.retrieval_tests import weaviate_qna, generate_crc
+from include.tasks.utils.retrieval_tests import weaviate_qna, generate_crc, generate_hybrid_crc
 from include.tasks.utils.schema import check_schema_subset
 
 from airflow.decorators import dag, task
@@ -204,29 +204,44 @@ def test_ask_astro_load_baseline():
         results_file = f'include/data/test_questions_{ts_nodash}.csv'
 
         csv_columns = [
-            'question', 
-            'status', 
-            'crc_answer', 
-            'crc_references', 
-            'vectordb_answer', 
-            'vectordb_references',  
-            'expected_references', 
-            'langsmith_link']
+            'test_number',
+            'question',
+            'expected_references',
+            'vectordb_answer',
+            'vectordb_references',
+            'crc_answer',
+            'crc_references',
+            'langsmith_link',
+            'hybrid_crc_answer',
+            'hybrid_crc_references',
+            'hybrid_langsmith_link'
+        ]
 
         questions_df=pd.read_csv(test_question_template_path)
 
         questions_df[["vectordb_answer", "vectordb_references"]] = questions_df\
-            .question.apply(lambda x: weaviate_qna(weaviate_client=weaviate_client, 
-                                                   question=x, 
-                                                   class_name=WEAVIATE_CLASS))
+            .question.apply(lambda x: weaviate_qna(
+                weaviate_client=weaviate_client, 
+                question=x, 
+                class_name=WEAVIATE_CLASS))
 
         questions_df[['crc_answer', 'crc_references', 'langsmith_link']] = questions_df\
-            .question.apply(lambda x: generate_crc(weaviate_client=weaviate_client,
-                                                   question=x,
-                                                   class_name=WEAVIATE_CLASS,
-                                                   ts_nodash=ts_nodash))
+            .question.apply(lambda x: generate_crc(
+                weaviate_client=weaviate_client,
+                question=x,
+                class_name=WEAVIATE_CLASS,
+                ts_nodash=ts_nodash,
+                send_feedback=False))
         
-        questions_df.to_csv(results_file, index=False)
+        questions_df[['hybrid_crc_answer', 'hybrid_crc_references', 'hybrid_langsmith_link']] = questions_df\
+            .question.apply(lambda x: generate_hybrid_crc(
+                weaviate_client=weaviate_client,
+                question=x,
+                class_name=WEAVIATE_CLASS,
+                ts_nodash=ts_nodash,
+                send_feedback=False))
+        
+        questions_df[csv_columns].to_csv(results_file, index=False)
 
         return results_file
 

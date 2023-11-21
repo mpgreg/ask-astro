@@ -28,17 +28,6 @@
             },
             "properties": [
                 {
-                    "name": "docSource",
-                    "description": "Type of document ('learn', 'astro', 'airflow', 'stackoverflow', 'code_samples')",
-                    "dataType": ["text"],
-                    "moduleConfig": {
-                        "text2vec-openai": {
-                            "skip": "False",
-                            "vectorizePropertyName": "False"
-                        }
-                    }
-                },
-                {
                     "name": "docLink",
                     "description": "The url of source data",
                     "dataType": ["text"],
@@ -58,17 +47,6 @@
                     "moduleConfig": {
                         "text2vec-openai": {
                             "skip": "False",
-                            "vectorizePropertyName": "False"
-                        }
-                    }
-                },
-                {
-                    "name": "sha",
-                    "description": "sha digest of content for checking changes",
-                    "dataType": ["text"],
-                    "moduleConfig": {
-                        "text2vec-openai": {
-                            "skip": "True",
                             "vectorizePropertyName": "False"
                         }
                     }
