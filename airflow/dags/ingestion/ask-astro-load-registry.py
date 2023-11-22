@@ -6,10 +6,10 @@ from include.tasks.extract import registry
 
 from airflow.decorators import dag, task
 
-ask_astro_env = os.environ.get("ASK_ASTRO_ENV", "")
+ask_astro_env = os.environ.get("ASK_ASTRO_ENV", "local")
 
 _WEAVIATE_CONN_ID = os.environ.get("WEAVIATE_CONN_ID", f"weaviate_{ask_astro_env}")
-WEAVIATE_CLASS = os.environ.get("WEAVIATE_CLASS", "DocsProd")
+WEAVIATE_CLASS = os.environ.get("WEAVIATE_CLASS", "DocsLocal")
 
 default_args = {"retries": 3, "retry_delay": 30}
 

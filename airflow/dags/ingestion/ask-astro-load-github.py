@@ -7,11 +7,11 @@ from include.tasks.extract import github
 
 from airflow.decorators import dag, task
 
-ask_astro_env = os.environ.get("ASK_ASTRO_ENV", "")
+ask_astro_env = os.environ.get("ASK_ASTRO_ENV", "local")
 
 _WEAVIATE_CONN_ID = os.environ.get("WEAVIATE_CONN_ID", f"weaviate_{ask_astro_env}")
 _GITHUB_CONN_ID = "github_ro"
-WEAVIATE_CLASS = os.environ.get("WEAVIATE_CLASS", "DocsProd")
+WEAVIATE_CLASS = os.environ.get("WEAVIATE_CLASS", "DocsLocal")
 
 markdown_docs_sources = [
     {"doc_dir": "", "repo_base": "OpenLineage/docs"},

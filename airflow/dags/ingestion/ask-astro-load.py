@@ -11,15 +11,16 @@ from include.tasks.utils.schema import check_schema_subset
 from weaviate.exceptions import UnexpectedStatusCodeException
 
 from airflow.decorators import dag, task
-from airflow.providers.weaviate.hooks.weaviate import WeaviateHook
+# from airflow.providers.weaviate.hooks.weaviate import WeaviateHook
+from include.utils.weaviate.hooks.weaviate import _WeaviateHook as WeaviateHook
 
 seed_baseline_url = None
 
-ask_astro_env = os.environ.get("ASK_ASTRO_ENV", "")
+ask_astro_env = os.environ.get("ASK_ASTRO_ENV", "local")
 
 _WEAVIATE_CONN_ID = os.environ.get("WEAVIATE_CONN_ID", f"weaviate_{ask_astro_env}")
 _GITHUB_CONN_ID = "github_ro"
-WEAVIATE_CLASS = os.environ.get("WEAVIATE_CLASS", "DocsProd")
+WEAVIATE_CLASS = os.environ.get("WEAVIATE_CLASS", "DocsLocal")
 
 weaviate_hook = WeaviateHook(_WEAVIATE_CONN_ID)
 weaviate_client = weaviate_hook.get_client()
@@ -129,47 +130,15 @@ def ask_astro_load_bulk():
         represented in the current schema.
         """
 
-        missing_objects = []
-
-        for class_object in class_objects:
-            try:
-                class_schema = weaviate_client.schema.get(class_object.get("class", ""))
-                if not check_schema_subset(class_object=class_object, class_schema=class_schema):
-                    missing_objects.append(class_object["class"])
-            except Exception as e:
-                if isinstance(e, UnexpectedStatusCodeException):
-                    if e.status_code == 404 and "with response body: None." in e.message:
-                        missing_objects.append(class_object["class"])
-                    else:
-                        raise (e)
-                else:
-                    raise (e)
-
-        if missing_objects:
-            print(f"Classes {missing_objects} are not in the current schema.")
-            return ["create_schema"]
-        else:
-            return ["check_seed_baseline"]
+        return (
+            ["check_seed_baseline"]
+            if weaviate_hook.check_schema(class_objects=class_objects)
+            else ["create_schema"]
+        )
 
     @task(trigger_rule="none_failed")
     def create_schema(class_objects: dict, existing: str = "ignore"):
-        for class_object in class_objects:
-            try:
-                current_class = weaviate_client.schema.get(class_name=class_object.get("class", ""))
-            except Exception:
-                current_class = None
-
-            if current_class is not None:
-                if existing == "replace":
-                    print(f"Deleting existing class {class_object['class']}")
-                    weaviate_client.schema.delete_class(class_name=class_object["class"])
-
-                elif existing == "ignore":
-                    print(f"Ignoring existing class {class_object['class']}")
-                    continue
-
-            weaviate_client.schema.create_class(class_object)
-            print(f"Created class {class_object['class']}")
+        weaviate_hook.create_schema(class_objects=class_objects, existing=existing)
 
     @task.branch(trigger_rule="none_failed")
     def check_seed_baseline(seed_baseline_url: str = None) -> str:
@@ -180,16 +149,16 @@ def ask_astro_load_bulk():
         if seed_baseline_url is not None:
             return "import_baseline"
         else:
-            return [
+            return {
                 "extract_github_markdown",
                 "extract_html",
-                "extract_stack_overflow",
-                # "extract_slack_archive",
+                "extract_stack_overflow_archive",
+                "extract_slack_archive",
                 "extract_astro_registry_cell_types",
                 "extract_github_issues",
                 "extract_github_python",
                 "extract_astro_registry_dags",
-            ]
+            }
 
     @task(trigger_rule="none_failed")
     def extract_github_markdown(source: dict):
@@ -271,7 +240,7 @@ def ask_astro_load_bulk():
 
         doc_dir = Path(f"include/data/github/{source['repo_base']}")
         doc_dir.mkdir(parents=True, exist_ok=True)
-        parquet_file = doc_dir.as_posix() + "issues" + ".parquet"
+        parquet_file = doc_dir.as_posix() + "/" + "issues" + ".parquet"
         
         try:
             df = pd.read_parquet(parquet_file)
@@ -284,9 +253,9 @@ def ask_astro_load_bulk():
     @task(trigger_rule="none_failed")
     def extract_astro_registry_cell_types():
 
-        doc_dir = Path(f"include/data/html/api.astronomer.io")
+        doc_dir = Path(f"include/data/html/api.astronomer.io/registry")
         doc_dir.mkdir(parents=True, exist_ok=True)
-        parquet_file = doc_dir.as_posix() + "registry_cells" + ".parquet"
+        parquet_file = doc_dir.as_posix() + "/" + "cells" + ".parquet"
 
         try:
             df = pd.read_parquet(parquet_file)
@@ -299,9 +268,9 @@ def ask_astro_load_bulk():
     @task(trigger_rule="none_failed")
     def extract_astro_registry_dags():
 
-        doc_dir = Path(f"include/data/html/api.astronomer.io")
+        doc_dir = Path(f"include/data/html/api.astronomer.io/registry")
         doc_dir.mkdir(parents=True, exist_ok=True)
-        parquet_file = doc_dir.as_posix() + "registry_dags" + ".parquet"
+        parquet_file = doc_dir.as_posix() + "/" + "dags" + ".parquet"
 
         try:
             df = pd.read_parquet(parquet_file)
@@ -314,7 +283,7 @@ def ask_astro_load_bulk():
     md_docs = extract_github_markdown.expand(source=markdown_docs_sources)
     issues_docs = extract_github_issues.expand(source=issues_docs_sources)
     stackoverflow_docs = extract_stack_overflow_archive.expand(tag=stackoverflow_tags)
-    # slack_docs = extract_slack_archive.expand(source=slack_channel_sources)
+    slack_docs = extract_slack_archive.expand(source=slack_channel_sources)
     registry_cells_docs = extract_astro_registry_cell_types()
     html_docs = extract_html.expand(source=html_docs_sources)
     registry_dags_docs = extract_astro_registry_dags()
@@ -329,7 +298,7 @@ def ask_astro_load_bulk():
         md_docs,
         issues_docs,
         stackoverflow_docs,
-        # slack_docs,
+        slack_docs,
         registry_cells_docs
     ]
 
