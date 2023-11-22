@@ -218,33 +218,45 @@ class _WeaviateHook(WeaviateHook):
         :param verbose: Whether to print verbose output.
         :return: List of any objects that failed to be added to the batch.
         """
-        self.client.batch.configure(**batch_params)
+        batch = self.client.batch.configure(**batch_params)
         batch_errors = []
 
-        with self.client.batch as batch:
-            for row_id, row in df.iterrows():
-                data_object = row.to_dict()
-                uuid = data_object.pop(uuid_column)
-                vector = data_object.pop(vector_column, None)
+        for row_id, row in df.iterrows():
+            
+            data_object = row.to_dict()
+            uuid = data_object.pop(uuid_column)
+            vector = data_object.pop(vector_column, None)
 
-                # Check if the uuid exists and handle accordingly
-                if self.client.data_object.exists(uuid=uuid, class_name=class_name):
+            try:
+                if self.client.data_object.exists(uuid=uuid, class_name=class_name) is True:
                     if existing == "skip":
-                        if verbose:
-                            self.logger.warning(f"UUID {uuid} exists. Skipping.")
+                        if verbose is True:
+                            print(f"UUID {uuid} exists.  Skipping.")
                         continue
                     elif existing == "replace":
-                        if verbose:
-                            self.logger.warning(f"UUID {uuid} exists. Overwriting.")
+                        # Default for weaviate is replace existing
+                        if verbose is True:
+                            print(f"UUID {uuid} exists.  Overwriting.")
+        
+            except Exception as e:
+                if verbose:
+                    self.logger.error(f"Failed to add row {row_id} with UUID {uuid}. Error: {e}")
+                batch_errors.append({"row_id": row_id, "uuid": uuid, "error": str(e)})
+                continue
+        
+            try:
+                added_row = batch.add_data_object(class_name=class_name, uuid=uuid, data_object=data_object, vector=vector)
+                if verbose is True:
+                    print(f"Added row {row_id} with UUID {added_row} for batch import.")
 
-                try:
-                    batch.add_data_object(class_name=class_name, uuid=uuid, data_object=data_object, vector=vector)
-                    if verbose:
-                        self.logger.info(f"Added row {row_id} with UUID {uuid} for batch import.")
-                except Exception as e:
-                    if verbose:
-                        self.logger.error(f"Failed to add row {row_id} with UUID {uuid}. Error: {e}")
-                    batch_errors.append({"row_id": row_id, "uuid": uuid, "error": str(e)})
+                results = batch.create_objects()
+    
+            except Exception as e:
+                if verbose:
+                    self.logger.error(f"Failed to add row {row_id} with UUID {uuid}. Error: {e}")
+                batch_errors.append({"uuid": uuid, "errors": [str(e)]})
+
+        batch_errors = batch_errors + self.process_batch_errors(results=results, verbose=verbose)
 
         return batch_errors
 
@@ -256,16 +268,18 @@ class _WeaviateHook(WeaviateHook):
         :param verbose: Flag to enable verbose logging.
         :return: List of error messages.
         """
-        batch_errors = []
+        errors = []
         for item in results:
             if "errors" in item["result"]:
-                item_error = {"id": item["id"], "errors": item["result"]["errors"]}
+                item_error = {"uuid": item["id"], "errors": item["result"]["errors"]}
                 if verbose:
                     self.logger.info(item_error)
-                batch_errors.append(item_error)
-        return batch_errors
+                errors.append(item_error)
+        return errors
 
-    def handle_upsert_rollback(self, objects_to_upsert: pd.DataFrame, class_name: str, verbose: bool):
+    def handle_upsert_rollback(
+            self, objects_to_upsert: pd.DataFrame, batch_errors: list, class_name: str, verbose: bool
+        ):
         """
         Handles rollback of inserts in case of errors during upsert operation.
 
@@ -273,12 +287,12 @@ class _WeaviateHook(WeaviateHook):
         :param class_name: Name of the class in Weaviate.
         :param verbose: Flag to enable verbose logging.
         """
-        for each object in errors identify the doc_key
-                for each doc_key identify all objects from objects_to_insert
-                remove only those associated with this doc_key
+        # for each object in errors identify the doc_key
+        #         for each doc_key identify all objects from objects_to_insert
+        #         remove only those associated with this doc_key
 
-
-        # objects_to_delete = {item for sublist in objects_to_upsert.objects_to_delete.tolist() for item in sublist}
+        
+        
 
 
         for uuid in objects_to_upsert["objects_to_insert"]:
@@ -288,6 +302,8 @@ class _WeaviateHook(WeaviateHook):
             elif verbose:
                 self.logger.info(f"UUID {uuid} does not exist. Skipping deletion.")
 
+
+        objects_to_delete = {item for sublist in objects_to_upsert.objects_to_delete.tolist() for item in sublist}
         for uuid in objects_to_upsert["objects_to_delete"]:
             if verbose:
                 self.logger.info(f"Deleting id {uuid} for successful upsert.")
@@ -335,8 +351,15 @@ class _WeaviateHook(WeaviateHook):
         if existing not in ["skip", "replace", "upsert"]:
             raise AirflowException("Invalid parameter for 'existing'. Choices are 'skip', 'replace', 'upsert'")
 
+        if uuid_column is None:
+            df, uuid_column = self.generate_uuids(
+                df=df, class_name=class_name, vector_column=vector_column, uuid_column=uuid_column
+            )
+
         if existing == "upsert":
-            objects_to_upsert = self.identify_upsert_targets(df, class_name, doc_key, uuid_column)
+            objects_to_upsert = self.identify_upsert_targets(
+                df=df, class_name=class_name, doc_key=doc_key, uuid_column=uuid_column
+            )
 
             objects_to_insert = {item for sublist in objects_to_upsert.objects_to_insert.tolist() for item in sublist}
 
@@ -349,11 +372,11 @@ class _WeaviateHook(WeaviateHook):
             df, class_name, uuid_column, vector_column, batch_params, existing, verbose
         )
 
-        batch_errors += self.process_batch_errors(batch_errors, verbose)
+        batch_errors += self.process_batch_errors(results=batch_errors, verbose=True)
 
         if existing == "upsert" and batch_errors:
             self.logger.warning("Error during upsert. Rolling back all inserts for docs with errors.")
-            self.handle_upsert_rollback(objects_to_upsert, class_name, verbose)
+            self.handle_upsert_rollback(objects_to_upsert, batch_errors, class_name, verbose)
 
         return batch_errors
 
