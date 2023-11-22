@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 
 from include.tasks import ingest, split
-from include.tasks.extract import html_docs
+from include.tasks.extract import html
 
 from airflow.decorators import dag, task
 
@@ -18,17 +18,17 @@ html_docs_sources = [
         "container_class": "prose"
     },
     {
-        "base_url": "https://docs.astronomer.io/astro/", 
+        "base_url": "https://docs.astronomer.io/astro", 
         "exclude_docs": [], 
         "container_class": "theme-doc-markdown markdown"
     },
     {
-        "base_url": "https://docs.astronomer.io/learn/", 
+        "base_url": "https://docs.astronomer.io/learn", 
         "exclude_docs": [r'learn/category', r'learn/tags'], 
         "container_class": "theme-doc-markdown markdown"
     },
     {
-        "base_url": "https://airflow.apache.org/docs/",
+        "base_url": "https://airflow.apache.org/docs",
         "exclude_docs": [
             r"/changelog.html",
             r"/commits.html",
@@ -65,7 +65,7 @@ def ask_astro_load_html():
     any existing documents that have been updated will be removed and re-added.
     """
 
-    extracted_html_docs = task(html_docs.extract_html).expand(source=html_docs_sources)
+    extracted_html_docs = task(html.extract_html).expand(source=html_docs_sources)
 
     split_html_docs = task(split.split_html).expand(dfs=extracted_html_docs)
 

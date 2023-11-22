@@ -26,8 +26,6 @@ def extract_github_markdown(source: dict, github_conn_id: str) -> pd.DataFrame:
     param github_conn_id: str
 
     The returned data includes the following fields:
-    'docSource': ie. 'astronomer/docs/astro', 'astronomer/docs/learn', etc.
-    'sha': the github sha for the document
     'docLink': URL for the specific document in github.
     'content': Entire document content in markdown format.
     """
@@ -48,9 +46,7 @@ def extract_github_markdown(source: dict, github_conn_id: str) -> pd.DataFrame:
 
             row = {
                 "docLink": file_content.html_url,
-                "sha": file_content.sha,
                 "content": file_content.decoded_content.decode(),
-                "docSource": "/".join([source["repo_base"], source.get("doc_dir")]),
             }
 
             downloaded_docs.append(row)
@@ -59,8 +55,7 @@ def extract_github_markdown(source: dict, github_conn_id: str) -> pd.DataFrame:
 
     df["content"] = df["content"].apply(lambda x: BeautifulSoup(x, "lxml").text)
 
-    # column order matters for uuid generation
-    df = df[["docSource", "sha", "content", "docLink"]]
+    df = df[["content", "docLink"]]
 
     return df
 
@@ -80,8 +75,6 @@ def extract_github_rst(source: dict, github_conn_id: str) -> pd.DataFrame:
     param github_conn_id: str
 
     The returned data includes the following fields:
-    'docSource': ie. 'astronomer/docs/astro', 'astronomer/docs/learn', etc.
-    'sha': the github sha for the document
     'docLink': URL for the specific document in github.
     'content': Entire document content in markdown format.
 
@@ -105,9 +98,7 @@ def extract_github_rst(source: dict, github_conn_id: str) -> pd.DataFrame:
 
             row = {
                 "docLink": file_content.html_url,
-                "sha": file_content.sha,
                 "content": file_content.decoded_content.decode(),
-                "docSource": "/".join([source["repo_base"], source.get("doc_dir")]),
             }
 
             downloaded_docs.append(row)
@@ -123,8 +114,7 @@ def extract_github_rst(source: dict, github_conn_id: str) -> pd.DataFrame:
         lambda x: pypandoc.convert_text(source=x, to="md", format="rst", extra_args=["--atx-headers"])
     )
 
-    # column order matters for uuid generation
-    df = df[["docSource", "sha", "content", "docLink"]]
+    df = df[["content", "docLink"]]
 
     return df
 
@@ -142,8 +132,6 @@ def extract_github_python(source: dict, github_conn_id: str) -> pd.DataFrame:
     param github_conn_id: str
 
     The returned data includes the following fields:
-    'docSource': ie. 'astronomer/docs/astro', 'astronomer/docs/learn', etc.
-    'sha': the github sha for the document
     'docLink': URL for the specific document in github.
     'content': Entire document content in markdown format.
     """
@@ -165,17 +153,14 @@ def extract_github_python(source: dict, github_conn_id: str) -> pd.DataFrame:
 
             row = {
                 "docLink": file_content.html_url,
-                "sha": file_content.sha,
                 "content": file_content.decoded_content.decode(),
-                "docSource": "/".join([source["repo_base"], source.get("doc_dir")]),
             }
 
             downloaded_docs.append(row)
 
     df = pd.DataFrame(downloaded_docs)
 
-    # column order matters for uuid generation
-    df = df[["docSource", "sha", "content", "docLink"]]
+    df = df[["content", "docLink"]]
 
     return df
 
@@ -198,8 +183,6 @@ def extract_github_issues(source: dict, github_conn_id: str) -> pd.DataFrame:
     param github_conn_id: str
 
     The returned data includes the following fields:
-    'docSource': ie. 'astronomer/docs/astro', 'astronomer/docs/learn', etc.
-    'sha': the github sha for the document
     'docLink': URL for the specific document in github.
     'content': Entire document content in markdown format.
 
@@ -261,7 +244,6 @@ def extract_github_issues(source: dict, github_conn_id: str) -> pd.DataFrame:
                 downloaded_docs.append(
                     {
                         "docLink": issue.html_url,
-                        "sha": "",
                         "content": issue_markdown_template.format(
                             title=issue.title,
                             date=issue.created_at.strftime("%m-%d-%Y"),
@@ -269,8 +251,7 @@ def extract_github_issues(source: dict, github_conn_id: str) -> pd.DataFrame:
                             state=issue.state,
                             body=issue.body,
                             comments="\n".join(comments),
-                        ),
-                        "docSource": f"{source['repo_base']}/issues",
+                        )
                     }
                 )
         page_num = page_num + 1
@@ -284,12 +265,9 @@ def extract_github_issues(source: dict, github_conn_id: str) -> pd.DataFrame:
     df["content"] = df["content"].apply(lambda x: re.sub(r"\r\n+", "\n\n", x).strip())
     df["content"] = df["content"].apply(lambda x: re.sub(r"\n+", "\n\n", x).strip())
 
-    df["sha"] = df.apply(generate_uuid5, axis=1)
-
     df.drop_duplicates(subset=["docLink"], keep="first", inplace=True)
     df.reset_index(drop=True, inplace=True)
 
-    # column order matters for uuid generation
-    df = df[["docSource", "sha", "content", "docLink"]]
+    df = df[["content", "docLink"]]
 
     return df

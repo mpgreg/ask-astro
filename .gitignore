@@ -230,19 +230,10 @@ pyrightconfig.json
 # End of https://www.toptal.com/developers/gitignore/api/python
 
 # Serialized baseline docs
-airflow/include/data/OpenLineage/OpenLineage/.parquet
-airflow/include/data/OpenLineage/docs/.parquet
-airflow/include/data/apache/airflow/docs.parquet
-airflow/include/data/apache/airflow/issues.parquet
-airflow/include/data/astronomer/blogs/astro_blogs.parquet
-airflow/include/data/astronomer/docs/astro.parquet
-airflow/include/data/astronomer/docs/code-samples.parquet
-airflow/include/data/astronomer/docs/learn.parquet
-airflow/include/data/astronomer/registry/registry_cells.parquet
-airflow/include/data/astronomer/registry/registry_dags.parquet
-airflow/include/data/baseline_data_*.parquet
-airflow/include/data/slack/troubleshooting.parquet
-
+airflow/include/data/github
+airflow/include/data/html
+airflow/include/data/stack_overflow
+airflow/include/data/slack
 
 # GCP
 api/gcp.json

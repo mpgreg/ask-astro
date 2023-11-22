@@ -28,10 +28,8 @@ def extract_astro_registry_cell_types() -> list[pd.DataFrame]:
     documents in a list of pandas dataframes. Return type is a list in order to map to upstream dynamic tasks.
 
     Returned dataframe fields are:
-    'docSource': 'registry_cell_types'
     'docLink': URL for the operator code in github
     'content': A small markdown document with cell type description
-    'sha': A reference to the registry searchID.
     """
 
     json_data_class = "modules"
@@ -47,8 +45,6 @@ def extract_astro_registry_cell_types() -> list[pd.DataFrame]:
     df["docLink"] = df.apply(
         lambda x: modules_link_template.format(providerName=x.providerName, version=x.version, _name=x["name"]), axis=1
     )
-    df.rename({"searchId": "sha"}, axis=1, inplace=True)
-    df["docSource"] = "astronomer registry modules"
 
     df["description"] = df["description"].apply(lambda x: html2text(x) if x else "No Description")
     df["content"] = df.apply(
@@ -58,8 +54,7 @@ def extract_astro_registry_cell_types() -> list[pd.DataFrame]:
         axis=1,
     )
 
-    # column order matters for uuid generation
-    df = df[["docSource", "sha", "content", "docLink"]]
+    df = df[["content", "docLink"]]
 
     return [df]
 
@@ -70,10 +65,8 @@ def extract_astro_registry_dags() -> list[pd.DataFrame]:
     type is a list in order to map to upstream dynamic tasks.
 
     Dataframe fields are:
-    'docSource': 'registry_dags'
     'docLink': URL for the Registry location
     'content': The python DAG code
-    'sha': A reference to the registry searchID.
     """
 
     json_data_class = "dags"
@@ -89,15 +82,11 @@ def extract_astro_registry_dags() -> list[pd.DataFrame]:
 
     df["docLink"] = df.apply(lambda x: dags_link_template.format(_name=x["name"], version=x.version), axis=1)
 
-    df.rename({"searchId": "sha"}, axis=1, inplace=True)
-    df["docSource"] = "astronomer registry dags"
-
     df["content"] = df["githubRawSourceUrl"].apply(lambda x: requests.get(x).text)
 
     df.drop_duplicates(subset=["docLink"], keep="first", inplace=True)
     df.reset_index(drop=True, inplace=True)
 
-    # column order matters for uuid generation
-    df = df[["docSource", "sha", "content", "docLink"]]
+    df = df[["content", "docLink"]]
 
     return [df]

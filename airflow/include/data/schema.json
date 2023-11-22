@@ -43,7 +43,7 @@
                     "name": "content",
                     "description": "Document content",
                     "dataType": ["text"],
-                    "tokenization": "word",
+                    "tokenization": "lowercase",
                     "moduleConfig": {
                         "text2vec-openai": {
                             "skip": "False",

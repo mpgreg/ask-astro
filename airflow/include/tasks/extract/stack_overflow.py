@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
-from include.tasks.extract.utils.stack_overflow_helpers import (
+from include.tasks.utils.stack_overflow_helpers import (
     process_stack_answers,
     process_stack_answers_api,
     process_stack_comments,
@@ -20,16 +20,12 @@ def extract_stack_overflow_archive(tag: dict) -> pd.DataFrame:
     and answers.  The task returns a pandas dataframe with all documents.  The archive data was pulled from
     the internet archives and processed to local files for ingest.
 
-    param tag: A dictionary with a list of Stack Overflow tag_names and cutoff_date.
-    The tag name is also used for populating the 'docSource'
+    param tag: A dictionary with a Stack Overflow tag name and cutoff_date.
     type tag: dict
 
     returned dataframe fields are:
-    'docSource': 'stackoverflow' plus the tag name (ie. 'airflow')
     'docLink': URL for the base question.
     'content': The question (plus answers) in markdown format.
-    'sha': a UUID based on the other fields.  This is for compatibility with other document types.
-
     """
 
     posts_df = pd.read_parquet("include/data/stack_overflow/posts/posts.parquet")
@@ -46,7 +42,7 @@ def extract_stack_overflow_archive(tag: dict) -> pd.DataFrame:
 
     comments_df = process_stack_comments(comments_df=comments_df)
 
-    questions_df = process_stack_questions(posts_df=posts_df, comments_df=comments_df, tag_names=tag["tag_names"])
+    questions_df = process_stack_questions(posts_df=posts_df, comments_df=comments_df, tag_name=tag["name"])
 
     answers_df = process_stack_answers(posts_df=posts_df, comments_df=comments_df)
 
@@ -54,20 +50,18 @@ def extract_stack_overflow_archive(tag: dict) -> pd.DataFrame:
     df = questions_df.join(answers_df)
     df = df.apply(
         lambda x: pd.Series(
-            [f"stackoverflow {' '.join(tag['tag_names'])}", x.docLink, "\n".join([x.content, x.answer_text])]
+            [x.docLink, "\n".join([x.content, x.answer_text])]
         ),
         axis=1,
     )
-    df.columns = ["docSource", "docLink", "content"]
+    df.columns = ["docLink", "content"]
 
     df.reset_index(inplace=True, drop=True)
-    df["sha"] = df.apply(generate_uuid5, axis=1)
 
     df.drop_duplicates(subset=["docLink"], keep="first", inplace=True)
     df.reset_index(drop=True, inplace=True)
 
-    # column order matters for uuid generation
-    df = df[["docSource", "sha", "content", "docLink"]]
+    df = df[["content", "docLink"]]
 
     return df
 
@@ -77,16 +71,12 @@ def extract_stack_overflow(tag: dict) -> pd.DataFrame:
     This task generates stack overflow documents as a single markdown document per question with associated comments
     and answers.  The task returns a pandas dataframe with all documents.
 
-    param tag: A dictionary with a list of Stack Overflow tag_names and cutoff_date.
-    The tag name is also used for populating the 'docSource'
+    param tag: A dictionary with a Stack Overflow tag name and cutoff_date.
     type tag: dict
 
     returned dataframe fields are:
-    'docSource': 'stackoverflow' plus the tag name (ie. 'airflow')
     'docLink': URL for the base question.
     'content': The question (plus answers) in markdown format.
-    'sha': a UUID based on the other fields.  This is for compatibility with other document types.
-
     """
 
     SITE = StackAPI(name="stackoverflow", page_size=100, max_pages=1000)
@@ -95,7 +85,7 @@ def extract_stack_overflow(tag: dict) -> pd.DataFrame:
     filter_ = "!-(5KXGCFLp3w9.-7QsAKFqaf5yFPl**9q*_hsHzYGjJGQ6BxnCMvDYijFE"
 
     questions_dict = SITE.fetch(
-        endpoint="questions", tagged=tag["tag_names"], fromdate=tag["cutoff_date"], filter=filter_
+        endpoint="questions", tagged=tag["name"], fromdate=tag["cutoff_date"], filter=filter_
     )
 
     items = questions_dict.pop("items")
@@ -114,7 +104,7 @@ def extract_stack_overflow(tag: dict) -> pd.DataFrame:
     questions_df = posts_df
     questions_df["comments"] = questions_df["comments"].fillna("")
     questions_df["question_comments"] = questions_df["comments"].apply(lambda x: process_stack_comments_api(x))
-    questions_df = process_stack_questions_api(questions_df=questions_df, tag_names=tag["tag_names"])
+    questions_df = process_stack_questions_api(questions_df=questions_df, tag_name=tag["name"])
 
     # process associated answers
     answers_df = posts_df.explode("answers").reset_index(drop=True)
@@ -127,12 +117,9 @@ def extract_stack_overflow(tag: dict) -> pd.DataFrame:
     df = questions_df.join(answers_df).reset_index(drop=True)
     df["content"] = df[["question_text", "answer_text"]].apply("\n".join, axis=1)
 
-    df["sha"] = df.apply(generate_uuid5, axis=1)
-
     df.drop_duplicates(subset=["docLink"], keep="first", inplace=True)
     df.reset_index(drop=True, inplace=True)
 
-    # column order matters for uuid generation
-    df = df[["docSource", "sha", "content", "docLink"]]
+    df = df[["content", "docLink"]]
 
     return df

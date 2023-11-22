@@ -5,7 +5,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 import requests
-from include.tasks.extract.utils.slack_helpers import get_slack_replies
+from include.tasks.utils.slack_helpers import get_slack_replies
 from weaviate.util import generate_uuid5
 
 from airflow.providers.slack.hooks.slack import SlackHook
@@ -35,10 +35,8 @@ def extract_slack_archive(source: dict) -> pd.DataFrame:
     type source: dict
 
     Returned dataframe fields are:
-    'docSource': slack team and channel names
     'docLink': URL for the specific message/reply
     'content': The message/reply content in markdown format.
-    'sha': A unique identifier of the client_msg_id
     """
 
     page_size = 500
@@ -71,10 +69,6 @@ def extract_slack_archive(source: dict) -> pd.DataFrame:
 
     df = df.merge(msg_ids, left_on="thread_ts", right_on="ts", how="left")
 
-    df["sha"] = df.apply(
-        lambda x: x.client_msg_id if x.client_msg_id is not np.nan else generate_uuid5(x.content), axis=1
-    )
-
     df["content"] = df["content"].apply(
         lambda x: slack_message_md_format.format(
             team_name=source["team_name"], channel_name=source["channel_name"], content=x
@@ -84,13 +78,11 @@ def extract_slack_archive(source: dict) -> pd.DataFrame:
     df["docLink"] = df["thread_ts"].apply(
         lambda x: slack_link_format.format(team_id=source["team_id"], channel_id=source["channel_id"], ts=str(x))
     )
-    df["docSource"] = source["channel_name"]
 
     df.drop_duplicates(subset=["docLink"], keep="first", inplace=True)
     df.reset_index(drop=True, inplace=True)
 
-    # column order matters for uuid generation
-    df = df[["docSource", "sha", "content", "docLink"]]
+    df = df[["content", "docLink"]]
 
     return df
 
@@ -112,10 +104,8 @@ def extract_slack(source: dict) -> pd.DataFrame:
     type source: dict
 
     Returned dataframe fields are:
-    'docSource': slack team and channel names
     'docLink': URL for the specific message/reply
     'content': The message/reply content in markdown format.
-    'sha': A unique identifier of the client_msg_id
     """
 
     page_size = 100
@@ -160,10 +150,6 @@ def extract_slack(source: dict) -> pd.DataFrame:
 
     df = df.merge(msg_ids, left_on="thread_ts", right_on="ts", how="left")
 
-    df["sha"] = df.apply(
-        lambda x: x.client_msg_id if x.client_msg_id is not np.nan else generate_uuid5(x.content), axis=1
-    )
-
     df["content"] = df["content"].apply(
         lambda x: slack_message_md_format.format(
             team_name=source["team_name"], channel_name=source["channel_name"], content=x
@@ -173,12 +159,10 @@ def extract_slack(source: dict) -> pd.DataFrame:
     df["docLink"] = df["thread_ts"].apply(
         lambda x: slack_link_format.format(team_id=source["team_id"], channel_id=source["channel_id"], ts=str(x))
     )
-    df["docSource"] = source["channel_name"]
 
     df.drop_duplicates(subset=["docLink"], keep="first", inplace=True)
     df.reset_index(drop=True, inplace=True)
 
-    # column order matters for uuid generation
-    df = df[["docSource", "sha", "content", "docLink"]]
+    df = df[["content", "docLink"]]
 
     return df

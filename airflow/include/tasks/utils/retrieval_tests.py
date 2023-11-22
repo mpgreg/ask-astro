@@ -29,7 +29,7 @@ def weaviate_qna(weaviate_client:WeaviateClient, question:str, class_name:str) -
 
     ask = {
                 "question": question,
-                "properties": ["content", "docSource"],
+                "properties": ["content"],
                 # "certainty": 0.0
             }
 

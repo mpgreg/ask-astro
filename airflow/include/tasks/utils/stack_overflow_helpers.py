@@ -124,7 +124,7 @@ def process_stack_comments(comments_df: pd.DataFrame) -> pd.DataFrame:
     return comments_df
 
 
-def process_stack_questions(posts_df: pd.DataFrame, comments_df: pd.DataFrame, tag_names: list) -> pd.DataFrame:
+def process_stack_questions(posts_df: pd.DataFrame, comments_df: pd.DataFrame, tag_name: str) -> pd.DataFrame:
     """
     This helper function builds a dataframe of slack questions based on posts and comments.
 
@@ -159,9 +159,8 @@ def process_stack_questions(posts_df: pd.DataFrame, comments_df: pd.DataFrame, t
 
     questions_df = questions_df[["link", "question_id", "question_text"]]
     questions_df = questions_df.set_index("question_id")
-    questions_df["docSource"] = f"stackoverflow {' '.join(tag_names)}"
-    questions_df = questions_df[["docSource", "link", "question_text"]]
-    questions_df.columns = ["docSource", "docLink", "content"]
+    questions_df = questions_df[["link", "question_text"]]
+    questions_df.columns = ["docLink", "content"]
 
     return questions_df
 
@@ -217,7 +216,7 @@ def process_stack_comments_api(comments: list) -> str:
     )
 
 
-def process_stack_questions_api(questions_df: pd.DataFrame, tag_names: list) -> pd.DataFrame:
+def process_stack_questions_api(questions_df: pd.DataFrame, tag_name: str) -> pd.DataFrame:
     """
     This helper function formats a questions dataframe pulled from slack api.
 
@@ -238,8 +237,6 @@ def process_stack_questions_api(questions_df: pd.DataFrame, tag_names: list) -> 
         axis=1,
     )
     questions_df = questions_df[["link", "question_id", "question_text"]].set_index("question_id")
-
-    questions_df["docSource"] = f"stackoverflow {' '.join(tag_names)}"
 
     questions_df.rename({"link": "docLink"}, axis=1, inplace=True)
 

@@ -4,7 +4,7 @@ import re
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-from include.tasks.extract.utils.html_helpers import get_all_links
+from include.tasks.utils.html_helpers import get_all_links
 
 def extract_html(source: dict) -> list[pd.DataFrame]:
     """

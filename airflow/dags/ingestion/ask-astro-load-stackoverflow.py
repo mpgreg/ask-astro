@@ -11,7 +11,7 @@ ask_astro_env = os.environ.get("ASK_ASTRO_ENV", "")
 _WEAVIATE_CONN_ID = os.environ.get("WEAVIATE_CONN_ID", f"weaviate_{ask_astro_env}")
 WEAVIATE_CLASS = os.environ.get("WEAVIATE_CLASS", "DocsProd")
 
-stackoverflow_tags = [{"tag_names": ["airflow"], "cutoff_date": 1630454400}]  # "2021-09-01"
+stackoverflow_tags = [{"name": ["airflow"], "cutoff_date": 1630454400}]  # "2021-09-01"
 
 default_args = {"retries": 3, "retry_delay": 30}
 

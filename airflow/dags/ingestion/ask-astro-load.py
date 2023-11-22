@@ -2,10 +2,11 @@ import datetime
 import json
 import os
 from pathlib import Path
+import urllib
 
 import pandas as pd
 from include.tasks import ingest, split
-from include.tasks.extract import airflow_docs, blogs, github, registry, stack_overflow
+from include.tasks.extract import html, github, registry, stack_overflow, slack
 from include.tasks.utils.schema import check_schema_subset
 from weaviate.exceptions import UnexpectedStatusCodeException
 
@@ -24,8 +25,6 @@ weaviate_hook = WeaviateHook(_WEAVIATE_CONN_ID)
 weaviate_client = weaviate_hook.get_client()
 
 markdown_docs_sources = [
-    {"doc_dir": "learn", "repo_base": "astronomer/docs"},
-    {"doc_dir": "astro", "repo_base": "astronomer/docs"},
     {"doc_dir": "", "repo_base": "OpenLineage/docs"},
     {"doc_dir": "", "repo_base": "OpenLineage/OpenLineage"},
 ]
@@ -45,11 +44,42 @@ slack_channel_sources = [
     }
 ]
 
-blog_cutoff_date = datetime.date(2023, 1, 19)
+html_docs_sources = [
+    {
+        "base_url": "https://www.astronomer.io/blog", 
+        "exclude_docs": [r"/\d/", r"/\d+$"], 
+        "container_class": "prose"
+    },
+    {
+        "base_url": "https://docs.astronomer.io/astro", 
+        "exclude_docs": [], 
+        "container_class": "theme-doc-markdown markdown"
+    },
+    {
+        "base_url": "https://docs.astronomer.io/learn", 
+        "exclude_docs": [r'learn/category', r'learn/tags'], 
+        "container_class": "theme-doc-markdown markdown"
+    },
+    {
+        "base_url": "https://airflow.apache.org/docs",
+        "exclude_docs": [
+            r"/changelog.html",
+            r"/commits.html",
+            r"/docs/apache-airflow/stable/release_notes.html",
+            r"/docs/stable/release_notes.html",
+            r"_api",
+            r"_modules",
+            r"/installing-providers-from-sources.html",
+            r"apache-airflow/1.",
+            r"apache-airflow/2.",
+            r"example",
+            r"cli-and-env-variables-ref.html",
+        ],
+        "container_class": "body"
+    }
+]
 
-stackoverflow_tags = [{"tag_names": ["airflow"], "cutoff_date": 1630454400}]  # "2021-09-01"
-
-airflow_docs_base_url = "https://airflow.apache.org/docs/"
+stackoverflow_tags = [{"name": "airflow", "cutoff_date": 1630454400}]  # "2021-09-01"
 
 default_args = {"retries": 3, "retry_delay": 30}
 
@@ -152,115 +182,143 @@ def ask_astro_load_bulk():
         else:
             return [
                 "extract_github_markdown",
-                "extract_airflow_docs",
+                "extract_html",
                 "extract_stack_overflow",
                 # "extract_slack_archive",
                 "extract_astro_registry_cell_types",
                 "extract_github_issues",
-                "extract_astro_blogs",
                 "extract_github_python",
                 "extract_astro_registry_dags",
             ]
 
     @task(trigger_rule="none_failed")
     def extract_github_markdown(source: dict):
+
+        doc_dir = Path(f"include/data/github/{source['repo_base']}")
+        doc_dir.mkdir(parents=True, exist_ok=True)
+        parquet_file = doc_dir.as_posix() + "/" + source['doc_dir'] + ".parquet"
+
         try:
-            df = pd.read_parquet(f"include/data/{source['repo_base']}/{source['doc_dir']}.parquet")
+            df = pd.read_parquet(parquet_file)
         except Exception:
             df = github.extract_github_markdown(source, github_conn_id=_GITHUB_CONN_ID)
-            df.to_parquet(f"include/data/{source['repo_base']}/{source['doc_dir']}.parquet")
+            df.to_parquet(parquet_file)
 
         return df
 
     @task(trigger_rule="none_failed")
     def extract_github_python(source: dict):
+
+        doc_dir = Path(f"include/data/github/{source['repo_base']}/")
+        doc_dir.mkdir(parents=True, exist_ok=True)
+        parquet_file = doc_dir.as_posix() + "/" + source['doc_dir'] + ".parquet"
+
         try:
-            df = pd.read_parquet(f"include/data/{source['repo_base']}/{source['doc_dir']}.parquet")
+            df = pd.read_parquet(parquet_file)
         except Exception:
             df = github.extract_github_python(source, _GITHUB_CONN_ID)
-            df.to_parquet(f"include/data/{source['repo_base']}/{source['doc_dir']}.parquet")
+            df.to_parquet(parquet_file)
 
         return df
 
     @task(trigger_rule="none_failed")
-    def extract_airflow_docs():
-        try:
-            df = pd.read_parquet("include/data/apache/airflow/docs.parquet")
-        except Exception:
-            df = airflow_docs.extract_airflow_docs(docs_base_url=airflow_docs_base_url)[0]
-            df.to_parquet("include/data/apache/airflow/docs.parquet")
+    def extract_html(source: dict):
+        
+        url_parts = urllib.parse.urlparse(source['base_url'])
+        
+        doc_dir = Path(f"include/data/html/{url_parts.netloc}")
+        doc_dir.mkdir(parents=True, exist_ok=True)
+        parquet_file = doc_dir.as_posix() + url_parts.path + ".parquet"
 
-        return [df]
+        try:
+            df = pd.read_parquet(parquet_file)
+        except Exception:
+            df = html.extract_html(source=source)[0]
+            df.to_parquet(parquet_file)
+
+        return df
 
     @task(trigger_rule="none_failed")
-    def extract_stack_overflow(tag: dict):
+    def extract_stack_overflow_archive(tag: dict):
+
+        parquet_file = "include/data/stack_overflow/archive/base.parquet"
+
         try:
-            df = pd.read_parquet("include/data/stack_overflow/base.parquet")
+            df = pd.read_parquet(parquet_file)
         except Exception:
             df = stack_overflow.extract_stack_overflow_archive(tag=tag)
-            df.to_parquet("include/data/stack_overflow/base.parquet")
+            df.to_parquet(parquet_file)
 
         return df
 
-    # @task(trigger_rule="none_failed")
-    # def extract_slack_archive(source: dict):
-    #     try:
-    #         df = pd.read_parquet("include/data/slack/troubleshooting.parquet")
-    #     except Exception:
-    #         df = slack.extract_slack_archive(source)
-    #         df.to_parquet("include/data/slack/troubleshooting.parquet")
-    #
-    #     return df
+    @task(trigger_rule="none_failed")
+    def extract_slack_archive(source: dict):
+
+        doc_dir = Path(f"include/data/slack/archive")
+        doc_dir.mkdir(parents=True, exist_ok=True)
+        parquet_file = doc_dir.as_posix() + "/" + source['channel_name'] + ".parquet"
+
+        try:
+            df = pd.read_parquet(parquet_file)
+        except Exception:
+            df = slack.extract_slack_archive(source)
+            df.to_parquet(parquet_file)
+    
+        return df
 
     @task(trigger_rule="none_failed")
     def extract_github_issues(source: dict):
+
+        doc_dir = Path(f"include/data/github/{source['repo_base']}")
+        doc_dir.mkdir(parents=True, exist_ok=True)
+        parquet_file = doc_dir.as_posix() + "issues" + ".parquet"
+        
         try:
-            df = pd.read_parquet(f"include/data/{source['repo_base']}/issues.parquet")
+            df = pd.read_parquet(parquet_file)
         except Exception:
             df = github.extract_github_issues(source, _GITHUB_CONN_ID)
-            df.to_parquet(f"include/data/{source['repo_base']}/issues.parquet")
+            df.to_parquet(parquet_file)
 
         return df
 
     @task(trigger_rule="none_failed")
     def extract_astro_registry_cell_types():
+
+        doc_dir = Path(f"include/data/html/api.astronomer.io")
+        doc_dir.mkdir(parents=True, exist_ok=True)
+        parquet_file = doc_dir.as_posix() + "registry_cells" + ".parquet"
+
         try:
-            df = pd.read_parquet("include/data/astronomer/registry/registry_cells.parquet")
+            df = pd.read_parquet(parquet_file)
         except Exception:
             df = registry.extract_astro_registry_cell_types()[0]
-            df.to_parquet("include/data/astronomer/registry/registry_cells.parquet")
+            df.to_parquet(parquet_file)
 
         return [df]
 
     @task(trigger_rule="none_failed")
     def extract_astro_registry_dags():
+
+        doc_dir = Path(f"include/data/html/api.astronomer.io")
+        doc_dir.mkdir(parents=True, exist_ok=True)
+        parquet_file = doc_dir.as_posix() + "registry_dags" + ".parquet"
+
         try:
-            df = pd.read_parquet("include/data/astronomer/registry/registry_dags.parquet")
+            df = pd.read_parquet(parquet_file)
         except Exception:
             df = registry.extract_astro_registry_dags()[0]
-            df.to_parquet("include/data/astronomer/registry/registry_dags.parquet")
-
-        return [df]
-
-    @task(trigger_rule="none_failed")
-    def extract_astro_blogs():
-        try:
-            df = pd.read_parquet("include/data/astronomer/blogs/astro_blogs.parquet")
-        except Exception:
-            df = blogs.extract_astro_blogs(blog_cutoff_date)[0]
-            df.to_parquet("include/data/astronomer/blogs/astro_blogs.parquet")
+            df.to_parquet(parquet_file)
 
         return [df]
 
     md_docs = extract_github_markdown.expand(source=markdown_docs_sources)
     issues_docs = extract_github_issues.expand(source=issues_docs_sources)
-    stackoverflow_docs = extract_stack_overflow.expand(tag=stackoverflow_tags)
+    stackoverflow_docs = extract_stack_overflow_archive.expand(tag=stackoverflow_tags)
     # slack_docs = extract_slack_archive.expand(source=slack_channel_sources)
     registry_cells_docs = extract_astro_registry_cell_types()
-    blogs_docs = extract_astro_blogs()
+    html_docs = extract_html.expand(source=html_docs_sources)
     registry_dags_docs = extract_astro_registry_dags()
     code_samples = extract_github_python.expand(source=code_samples_sources)
-    _airflow_docs = extract_airflow_docs()
 
     _get_schema = get_schema()
     _check_schema = check_schema(class_objects=_get_schema)
@@ -272,11 +330,10 @@ def ask_astro_load_bulk():
         issues_docs,
         stackoverflow_docs,
         # slack_docs,
-        blogs_docs,
-        registry_cells_docs,
+        registry_cells_docs
     ]
 
-    html_tasks = [_airflow_docs]
+    html_tasks = [html_docs]
 
     python_code_tasks = [registry_dags_docs, code_samples]
 
