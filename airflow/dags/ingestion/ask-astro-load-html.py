@@ -13,34 +13,40 @@ WEAVIATE_CLASS = os.environ.get("WEAVIATE_CLASS", "DocsLocal")
 
 html_docs_sources = [
     {
-        "base_url": "https://www.astronomer.io/blog", 
-        "exclude_docs": [r"/\d/", r"/\d+$"], 
+        "base_url": "https://astronomer-providers.readthedocs.io/en/stable/", 
+        "exclude_docs": [r"/changelog.html"], 
+        "container_class": "body"
+    },
+    {
+        "base_url": "https://astro-sdk-python.readthedocs.io/en/stable/", 
+        "exclude_docs": [r"/changelog.html"], 
+        "container_class": "body"
+    },
+    {
+        "base_url": "https://www.astronomer.io/blog/", 
+        "exclude_docs": [r"/\d+/", r"/\d+$"], 
         "container_class": "prose"
     },
     {
-        "base_url": "https://docs.astronomer.io/astro", 
+        "base_url": "https://docs.astronomer.io/astro/", 
         "exclude_docs": [], 
         "container_class": "theme-doc-markdown markdown"
     },
     {
-        "base_url": "https://docs.astronomer.io/learn", 
+        "base_url": "https://docs.astronomer.io/learn/", 
         "exclude_docs": [r'learn/category', r'learn/tags'], 
         "container_class": "theme-doc-markdown markdown"
     },
     {
-        "base_url": "https://airflow.apache.org/docs",
+        "base_url": "https://airflow.apache.org/docs/",
         "exclude_docs": [
             r"/changelog.html",
             r"/commits.html",
-            r"/docs/apache-airflow/stable/release_notes.html",
-            r"/docs/stable/release_notes.html",
             r"_api",
             r"_modules",
-            r"/installing-providers-from-sources.html",
             r"apache-airflow/1.",
             r"apache-airflow/2.",
             r"example",
-            r"cli-and-env-variables-ref.html",
         ],
         "container_class": "body"
     }

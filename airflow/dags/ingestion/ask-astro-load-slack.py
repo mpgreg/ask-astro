@@ -9,7 +9,8 @@ from airflow.decorators import dag, task
 ask_astro_env = os.environ.get("ASK_ASTRO_ENV", "local")
 
 _WEAVIATE_CONN_ID = os.environ.get("WEAVIATE_CONN_ID", f"weaviate_{ask_astro_env}")
-WEAVIATE_CLASS = os.environ.get("WEAVIATE_CLASS", "DocsLocal)
+WEAVIATE_CLASS = os.environ.get("WEAVIATE_CLASS", "DocsLocal")
+
 slack_channel_sources = [
     {
         "channel_name": "troubleshooting",

@@ -16,18 +16,15 @@ def extract_html(source: dict) -> list[pd.DataFrame]:
 
     Note: Only the html classes from the source's container_class and children are extracted.
 
-    param source: A dictionary specifying base_url, docs to exclude and the container_class
+    :param: source: A dictionary specifying base_url, docs to exclude and the container_class
      Example
         {
             "base_url": "https://docs.astronomer.io/astro/", 
             "exclude_docs": [r'[1-9]$'], 
             "container_class": "theme-doc-markdown markdown"
         }
-    type source: dict
 
-    The returned data includes the following fields:
-    'docLink': URL for the page
-    'content': HTML content of the page
+    :return: A dataframe
     """
 
     all_links = {source['base_url']}

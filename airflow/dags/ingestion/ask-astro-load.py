@@ -7,12 +7,10 @@ import urllib
 import pandas as pd
 from include.tasks import ingest, split
 from include.tasks.extract import html, github, registry, stack_overflow, slack
-from include.tasks.utils.schema import check_schema_subset
-from weaviate.exceptions import UnexpectedStatusCodeException
 
 from airflow.decorators import dag, task
 # from airflow.providers.weaviate.hooks.weaviate import WeaviateHook
-from include.utils.weaviate.hooks.weaviate import _WeaviateHook as WeaviateHook
+from include.utils.weaviate.hooks.weaviate import _WeaviateHook
 
 seed_baseline_url = None
 
@@ -22,7 +20,7 @@ _WEAVIATE_CONN_ID = os.environ.get("WEAVIATE_CONN_ID", f"weaviate_{ask_astro_env
 _GITHUB_CONN_ID = "github_ro"
 WEAVIATE_CLASS = os.environ.get("WEAVIATE_CLASS", "DocsLocal")
 
-weaviate_hook = WeaviateHook(_WEAVIATE_CONN_ID)
+weaviate_hook = _WeaviateHook(_WEAVIATE_CONN_ID)
 weaviate_client = weaviate_hook.get_client()
 
 markdown_docs_sources = [
@@ -47,34 +45,40 @@ slack_channel_sources = [
 
 html_docs_sources = [
     {
-        "base_url": "https://www.astronomer.io/blog", 
-        "exclude_docs": [r"/\d/", r"/\d+$"], 
+        "base_url": "https://astronomer-providers.readthedocs.io/en/stable/", 
+        "exclude_docs": [r"/changelog.html"], 
+        "container_class": "body"
+    },
+    {
+        "base_url": "https://astro-sdk-python.readthedocs.io/en/stable/", 
+        "exclude_docs": [r"/changelog.html"], 
+        "container_class": "body"
+    },
+    {
+        "base_url": "https://www.astronomer.io/blog/", 
+        "exclude_docs": [r"/\d+/", r"/\d+$"], 
         "container_class": "prose"
     },
     {
-        "base_url": "https://docs.astronomer.io/astro", 
+        "base_url": "https://docs.astronomer.io/astro/", 
         "exclude_docs": [], 
         "container_class": "theme-doc-markdown markdown"
     },
     {
-        "base_url": "https://docs.astronomer.io/learn", 
+        "base_url": "https://docs.astronomer.io/learn/", 
         "exclude_docs": [r'learn/category', r'learn/tags'], 
         "container_class": "theme-doc-markdown markdown"
     },
     {
-        "base_url": "https://airflow.apache.org/docs",
+        "base_url": "https://airflow.apache.org/docs/",
         "exclude_docs": [
             r"/changelog.html",
             r"/commits.html",
-            r"/docs/apache-airflow/stable/release_notes.html",
-            r"/docs/stable/release_notes.html",
             r"_api",
             r"_modules",
-            r"/installing-providers-from-sources.html",
             r"apache-airflow/1.",
             r"apache-airflow/2.",
             r"example",
-            r"cli-and-env-variables-ref.html",
         ],
         "container_class": "body"
     }
@@ -163,9 +167,8 @@ def ask_astro_load_bulk():
     @task(trigger_rule="none_failed")
     def extract_github_markdown(source: dict):
 
-        doc_dir = Path(f"include/data/github/{source['repo_base']}")
-        doc_dir.mkdir(parents=True, exist_ok=True)
-        parquet_file = doc_dir.as_posix() + "/" + source['doc_dir'] + ".parquet"
+        parquet_file = Path(f"include/data/github/{source['repo_base']}/{source['doc_dir']}/docs.parquet")
+        parquet_file.parent.mkdir(parents=True, exist_ok=True)
 
         try:
             df = pd.read_parquet(parquet_file)
@@ -178,9 +181,8 @@ def ask_astro_load_bulk():
     @task(trigger_rule="none_failed")
     def extract_github_python(source: dict):
 
-        doc_dir = Path(f"include/data/github/{source['repo_base']}/")
-        doc_dir.mkdir(parents=True, exist_ok=True)
-        parquet_file = doc_dir.as_posix() + "/" + source['doc_dir'] + ".parquet"
+        parquet_file = Path(f"include/data/github/{source['repo_base']}/{source['doc_dir']}/code.parquet")
+        parquet_file.parent.mkdir(parents=True, exist_ok=True)
 
         try:
             df = pd.read_parquet(parquet_file)
@@ -195,9 +197,8 @@ def ask_astro_load_bulk():
         
         url_parts = urllib.parse.urlparse(source['base_url'])
         
-        doc_dir = Path(f"include/data/html/{url_parts.netloc}")
-        doc_dir.mkdir(parents=True, exist_ok=True)
-        parquet_file = doc_dir.as_posix() + url_parts.path + ".parquet"
+        parquet_file = Path(f"include/data/html/{url_parts.netloc}"+url_parts.path+"docs.parquet")
+        parquet_file.parent.mkdir(parents=True, exist_ok=True)
 
         try:
             df = pd.read_parquet(parquet_file)
@@ -210,7 +211,8 @@ def ask_astro_load_bulk():
     @task(trigger_rule="none_failed")
     def extract_stack_overflow_archive(tag: dict):
 
-        parquet_file = "include/data/stack_overflow/archive/base.parquet"
+        parquet_file = Path(f"include/data/stack_overflow/archive/{tag['name']}/base.parquet")
+        parquet_file.parent.mkdir(parents=True, exist_ok=True)
 
         try:
             df = pd.read_parquet(parquet_file)
@@ -223,9 +225,8 @@ def ask_astro_load_bulk():
     @task(trigger_rule="none_failed")
     def extract_slack_archive(source: dict):
 
-        doc_dir = Path(f"include/data/slack/archive")
-        doc_dir.mkdir(parents=True, exist_ok=True)
-        parquet_file = doc_dir.as_posix() + "/" + source['channel_name'] + ".parquet"
+        parquet_file = Path(f"include/data/slack/archive/{source['channel_name']}.parquet")
+        parquet_file.parent.mkdir(parents=True, exist_ok=True)
 
         try:
             df = pd.read_parquet(parquet_file)
@@ -238,10 +239,9 @@ def ask_astro_load_bulk():
     @task(trigger_rule="none_failed")
     def extract_github_issues(source: dict):
 
-        doc_dir = Path(f"include/data/github/{source['repo_base']}")
-        doc_dir.mkdir(parents=True, exist_ok=True)
-        parquet_file = doc_dir.as_posix() + "/" + "issues" + ".parquet"
-        
+        parquet_file = Path(f"include/data/github/{source['repo_base']}/issues.parquet")
+        parquet_file.parent.mkdir(parents=True, exist_ok=True)
+
         try:
             df = pd.read_parquet(parquet_file)
         except Exception:
@@ -253,9 +253,8 @@ def ask_astro_load_bulk():
     @task(trigger_rule="none_failed")
     def extract_astro_registry_cell_types():
 
-        doc_dir = Path(f"include/data/html/api.astronomer.io/registry")
-        doc_dir.mkdir(parents=True, exist_ok=True)
-        parquet_file = doc_dir.as_posix() + "/" + "cells" + ".parquet"
+        parquet_file = Path(f"include/data/html/api.astronomer.io/registry/modules.parquet")
+        parquet_file.parent.mkdir(parents=True, exist_ok=True)
 
         try:
             df = pd.read_parquet(parquet_file)
@@ -268,9 +267,8 @@ def ask_astro_load_bulk():
     @task(trigger_rule="none_failed")
     def extract_astro_registry_dags():
 
-        doc_dir = Path(f"include/data/html/api.astronomer.io/registry")
-        doc_dir.mkdir(parents=True, exist_ok=True)
-        parquet_file = doc_dir.as_posix() + "/" + "dags" + ".parquet"
+        parquet_file = Path(f"include/data/html/api.astronomer.io/registry/dags.parquet")
+        parquet_file.parent.mkdir(parents=True, exist_ok=True)
 
         try:
             df = pd.read_parquet(parquet_file)
@@ -317,24 +315,24 @@ def ask_astro_load_bulk():
         .partial(
             weaviate_conn_id=_WEAVIATE_CONN_ID,
             class_name=WEAVIATE_CLASS,
-            existing="upsert",
-            doc_key="docLink",
+            existing="skip",
             batch_params={"batch_size": 1000},
             verbose=True,
         )
         .expand(dfs=[split_md_docs, split_code_docs, split_html_docs])
     )
 
-    _import_baseline = task(ingest.import_baseline, trigger_rule="none_failed")(
-        weaviate_conn_id=_WEAVIATE_CONN_ID,
-        seed_baseline_url=seed_baseline_url,
-        class_name=WEAVIATE_CLASS,
-        existing="upsert",
-        doc_key="docLink",
-        uuid_column="id",
-        vector_column="vector",
-        batch_params={"batch_size": 1000},
-        verbose=True,
+    _import_baseline = (
+        task(ingest.import_baseline, trigger_rule="none_failed")(
+            weaviate_conn_id=_WEAVIATE_CONN_ID,
+            seed_baseline_url=seed_baseline_url,
+            class_name=WEAVIATE_CLASS,
+            existing="skip",
+            uuid_column="id",
+            vector_column="vector",
+            batch_params={"batch_size": 1000},
+            verbose=True,
+        )
     )
 
     _check_schema >> [_check_seed_baseline, _create_schema]
