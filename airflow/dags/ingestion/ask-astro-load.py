@@ -12,7 +12,7 @@ from airflow.decorators import dag, task
 # from airflow.providers.weaviate.hooks.weaviate import WeaviateHook
 from include.utils.weaviate.hooks.weaviate import _WeaviateHook
 
-seed_baseline_url = None
+seed_baseline_url = None #'https://astronomer-demos-public-readonly.s3.us-west-2.amazonaws.com/ask-astro/baseline_data_v5.parquet'
 
 ask_astro_env = os.environ.get("ASK_ASTRO_ENV", "local")
 
@@ -42,16 +42,15 @@ slack_channel_sources = [
         "slack_api_conn_id": "slack_api_ro",
     }
 ]
-
 html_docs_sources = [
     {
         "base_url": "https://astronomer-providers.readthedocs.io/en/stable/", 
-        "exclude_docs": [r"/changelog.html"], 
+        "exclude_docs": [r"/changelog.html", r"/_sources/", r"/_modules/", r".txt$"], 
         "container_class": "body"
     },
     {
         "base_url": "https://astro-sdk-python.readthedocs.io/en/stable/", 
-        "exclude_docs": [r"/changelog.html"], 
+        "exclude_docs": [r"/changelog.html", r"_api", r"_modules"], 
         "container_class": "body"
     },
     {
@@ -83,8 +82,19 @@ html_docs_sources = [
         "container_class": "body"
     }
 ]
-
-stackoverflow_tags = [{"name": "airflow", "cutoff_date": 1630454400}]  # "2021-09-01"
+stackoverflow_tags = [
+    {
+        "name": "airflow", 
+        "cutoff_date": 1630454400,  # "2021-09-01"
+        "archive_posts": [
+            "https://astronomer-demos-public-readonly.s3.us-west-2.amazonaws.com/ask-astro/extract/stackoverflow_archive/posts.parquet",
+        ],
+        "archive_comments": [
+            "https://astronomer-demos-public-readonly.s3.us-west-2.amazonaws.com/ask-astro/extract/stackoverflow_archive/comments_0.parquet",
+            "https://astronomer-demos-public-readonly.s3.us-west-2.amazonaws.com/ask-astro/extract/stackoverflow_archive/comments_1.parquet"
+            ]
+    }
+]
 
 default_args = {"retries": 3, "retry_delay": 30}
 
@@ -211,7 +221,7 @@ def ask_astro_load_bulk():
     @task(trigger_rule="none_failed")
     def extract_stack_overflow_archive(tag: dict):
 
-        parquet_file = Path(f"include/data/stack_overflow/archive/{tag['name']}/base.parquet")
+        parquet_file = Path(f"include/data/stack_overflow/archive/{tag['name']}.parquet")
         parquet_file.parent.mkdir(parents=True, exist_ok=True)
 
         try:

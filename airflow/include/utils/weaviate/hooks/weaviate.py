@@ -61,7 +61,7 @@ class _WeaviateHook(WeaviateHook):
         """
         try:
             class_schema = self.client.schema.get(class_object.get("class", ""))
-            return self.compare_schema_subset(class_object=class_object, class_schema=class_schema)
+            return not self.compare_schema_subset(class_object=class_object, class_schema=class_schema)
         except UnexpectedStatusCodeException as e:
             return e.status_code == 404 and "with response body: None." in e.message
         except Exception as e:
@@ -144,16 +144,16 @@ class _WeaviateHook(WeaviateHook):
             uuid_column = 'id'
 
         if uuid_column in column_names:
-            raise AirflowException(
-                f"Property {uuid_column} already in dataset. Consider renaming or specify a different 'uuid_column'."
+            self.logger.info(
+                f"Property {uuid_column} already in dataset. Not generating new UUIDs."
                 )
-
-        df[uuid_column] = df[column_subset].drop(
-            columns=[vector_column], 
-            inplace=False, 
-            errors="ignore").apply(
-                lambda row: generate_uuid5(identifier=row.to_dict(), namespace=class_name), axis=1
-            )
+        else:
+            df[uuid_column] = df[column_subset].drop(
+                columns=[vector_column], 
+                inplace=False, 
+                errors="ignore").apply(
+                    lambda row: generate_uuid5(identifier=row.to_dict(), namespace=class_name), axis=1
+                )
 
         return df, uuid_column
 

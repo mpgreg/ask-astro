@@ -17,28 +17,17 @@ from weaviate.util import generate_uuid5
 def extract_stack_overflow_archive(tag: dict) -> pd.DataFrame:
     """
     This task generates stack overflow documents as a single markdown document per question with associated comments
-    and answers.  The task returns a pandas dataframe with all documents.  The archive data was pulled from
-    the internet archives and processed to local files for ingest.
+    and answers. The archive data was pulled from the internet archives and processed to extract tag-related posts.
 
-    param tag: A dictionary with a Stack Overflow tag name and cutoff_date.
-    type tag: dict
-
-    returned dataframe fields are:
-    'docLink': URL for the base question.
-    'content': The question (plus answers) in markdown format.
+    :param tag: A dictionary with a Stack Overflow tag name, cutoff_date and links to archived posts and comments.
+    :return: A pandas dataframe with 'content' and 'docLink'
     """
 
-    posts_df = pd.read_parquet("include/data/stack_overflow/posts/posts.parquet")
+    posts_df = pd.concat([pd.read_parquet(url) for url in tag["archive_posts"]], ignore_index=True)
 
     posts_df = process_stack_posts(posts_df=posts_df, cutoff_date=tag["cutoff_date"])
 
-    comments_df = pd.concat(
-        [
-            pd.read_parquet("include/data/stack_overflow/comments/comments_0.parquet"),
-            pd.read_parquet("include/data/stack_overflow/comments/comments_1.parquet"),
-        ],
-        ignore_index=True,
-    )
+    comments_df = pd.concat([pd.read_parquet(url) for url in tag["archive_comments"]], ignore_index=True)
 
     comments_df = process_stack_comments(comments_df=comments_df)
 
@@ -69,14 +58,10 @@ def extract_stack_overflow_archive(tag: dict) -> pd.DataFrame:
 def extract_stack_overflow(tag: dict) -> pd.DataFrame:
     """
     This task generates stack overflow documents as a single markdown document per question with associated comments
-    and answers.  The task returns a pandas dataframe with all documents.
+    and answers.
 
-    param tag: A dictionary with a Stack Overflow tag name and cutoff_date.
-    type tag: dict
-
-    returned dataframe fields are:
-    'docLink': URL for the base question.
-    'content': The question (plus answers) in markdown format.
+    :param tag: A dictionary with a Stack Overflow tag name and cutoff_date.
+    :return: A pandas dataframe with 'content' and 'docLink'
     """
 
     SITE = StackAPI(name="stackoverflow", page_size=100, max_pages=1000)

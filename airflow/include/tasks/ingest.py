@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from airflow.exceptions import AirflowException
 from include.utils.weaviate.hooks.weaviate import _WeaviateHook
 import logging
 import pandas as pd
-import requests
 
 logger = logging.getLogger("airflow.task")
 
@@ -40,7 +38,9 @@ def import_data(
 
     df = pd.concat(dfs, ignore_index=True)
 
-    df, uuid_column = weaviate_hook.generate_uuids(df=df, class_name=class_name)
+    df, uuid_column = weaviate_hook.generate_uuids(
+        df=df, class_name=class_name, uuid_column=uuid_column, vector_column=vector_column
+        )
 
     duplicates = df[df[uuid_column].duplicated()]
     if len(duplicates) > 0:
@@ -93,14 +93,12 @@ def import_baseline(
         df = pd.read_parquet(seed_filename)
 
     except Exception:
-        with open(seed_filename, "wb") as fh:
-            response = requests.get(seed_baseline_url, stream=True)
-            fh.writelines(response.iter_content(1024))
-
-        df = pd.read_parquet(seed_filename)
+        
+        df = pd.read_parquet(seed_baseline_url)
+        df.to_parquet(seed_filename)
 
     return import_data(
-                weaviate_hook=weaviate_hook,
+                weaviate_conn_id=weaviate_conn_id,
                 dfs=[df],
                 class_name=class_name,
                 existing=existing,

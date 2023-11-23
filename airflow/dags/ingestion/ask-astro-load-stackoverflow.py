@@ -11,7 +11,19 @@ ask_astro_env = os.environ.get("ASK_ASTRO_ENV", "local")
 _WEAVIATE_CONN_ID = os.environ.get("WEAVIATE_CONN_ID", f"weaviate_{ask_astro_env}")
 WEAVIATE_CLASS = os.environ.get("WEAVIATE_CLASS", "DocsLocal")
 
-stackoverflow_tags = [{"name": ["airflow"], "cutoff_date": 1630454400}]  # "2021-09-01"
+stackoverflow_tags = [
+    {
+        "name": "airflow", 
+        "cutoff_date": 1630454400,  # "2021-09-01"
+        "archive_posts": [
+            "https://astronomer-demos-public-readonly.s3.us-west-2.amazonaws.com/ask-astro/extract/stackoverflow_archive/posts.parquet",
+        ],
+        "archive_comments": [
+            "https://astronomer-demos-public-readonly.s3.us-west-2.amazonaws.com/ask-astro/extract/stackoverflow_archive/comments_0.parquet",
+            "https://astronomer-demos-public-readonly.s3.us-west-2.amazonaws.com/ask-astro/extract/stackoverflow_archive/comments_1.parquet"
+            ]
+    }
+]
 
 default_args = {"retries": 3, "retry_delay": 30}
 

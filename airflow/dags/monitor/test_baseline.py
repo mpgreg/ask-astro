@@ -13,7 +13,8 @@ from airflow.decorators import dag, task
 from airflow.providers.google.cloud.transfers.local_to_gcs import LocalFilesystemToGCSOperator
 from airflow.providers.google.cloud.transfers.gcs_to_local import GCSToLocalFilesystemOperator
 from airflow.providers.google.suite.operators.sheets import GoogleSheetsCreateSpreadsheetOperator
-from airflow.providers.weaviate.hooks.weaviate import WeaviateHook
+# from airflow.providers.weaviate.hooks.weaviate import WeaviateHook
+from include.utils.weaviate.hooks.weaviate import _WeaviateHook
 from airflow.operators.python import get_current_context
 from weaviate.exceptions import UnexpectedStatusCodeException
 
@@ -24,7 +25,7 @@ WEAVIATE_CLASS = os.environ.get("WEAVIATE_CLASS", "DocsProd")
 _WEAVIATE_CONN_ID = os.environ.get("WEAVIATE_CONN_ID", f"weaviate_{ask_astro_env}")
 _GCP_CONN_ID = 'google_cloud_default'
 
-weaviate_hook = WeaviateHook(_WEAVIATE_CONN_ID)
+weaviate_hook = _WeaviateHook(_WEAVIATE_CONN_ID)
 weaviate_client = weaviate_hook.get_client()
 
 test_question_template_path = Path("include/data/test_questions_template.csv")
@@ -84,29 +85,11 @@ def test_ask_astro_load_baseline():
         represented in the current schema.
         """
 
-        missing_objects = []
-
-        for class_object in class_objects:
-            try:
-                class_schema = weaviate_client.schema.get(class_object.get("class", ""))
-                if not check_schema_subset(class_object=class_object, class_schema=class_schema):
-                    missing_objects.append(class_object["class"])
-            except Exception as e:
-                if isinstance(e, UnexpectedStatusCodeException):
-                    if e.status_code == 404 and "with response body: None." in e.message:
-                        missing_objects.append(class_object["class"])
-                    else:
-                        raise (e)
-                else:
-                    raise (e)
-
-        if missing_objects:
-            print(f"Classes {missing_objects} are not in the current schema.")
-            return None
-        else:
-            return ["generate_test_answers",
-                    # "get_existing_doc"
-                    ]
+        return (
+            ["get_existing_doc", "create_test_object"]
+            if weaviate_hook.check_schema(class_objects=class_objects)
+            else None
+        )
     
     @task()
     def get_existing_doc(doc_link:str) -> list[pd.DataFrame]:
@@ -261,60 +244,58 @@ def test_ask_astro_load_baseline():
     #     spreadsheet={}
     # )
 
-    # _get_schema = get_schema()
-    # _check_schema = check_schema(class_objects=_get_schema)
-    # original_doc = get_existing_doc(doc_link=test_doc_link)
-    # test_doc = create_test_object(original_doc)
+    _get_schema = get_schema()
+    _check_schema = check_schema(class_objects=_get_schema)
+    original_doc = get_existing_doc(doc_link=test_doc_link)
+    test_doc = create_test_object(original_doc)
 
-    # split_test_doc = task(split.split_markdown).expand(dfs=[test_doc])
+    split_test_doc = task(split.split_markdown).expand(dfs=[test_doc])
 
-    # _upsert_test_doc = (
-    #     task(ingest.import_data, retries=10)
-    #     .partial(
-    #         weaviate_conn_id=_WEAVIATE_CONN_ID,
-    #         class_name=WEAVIATE_CLASS,
-    #         existing="upsert",
-    #         doc_key="docLink",
-    #         batch_params={"batch_size": 1000},
-    #         verbose=True,
-    #     )
-    #     .expand(dfs=[split_test_doc])
-    # )
+    _upsert_test_doc = (
+        task(ingest.import_data, retries=10)
+        .partial(
+            weaviate_conn_id=_WEAVIATE_CONN_ID,
+            class_name=WEAVIATE_CLASS,
+            existing="upsert",
+            doc_key="docLink",
+            batch_params={"batch_size": 1000},
+            verbose=True,
+        )
+        .expand(dfs=[split_test_doc])
+    )
 
-    # _check_test_objects = check_test_objects(
-    #   original_doc=original_doc, 
-    #   doc_link=test_doc_link
-    # )
-    # _remove_test_objects = remove_test_objects()
+    _check_test_objects = check_test_objects(
+      original_doc=original_doc, 
+      doc_link=test_doc_link
+    )
 
-    # split_original_doc = task(split.split_markdown).expand(dfs=[original_doc])
+    split_original_doc = task(split.split_markdown).expand(dfs=[original_doc])
 
-    # _upsert_original_doc = (
-    #     task(ingest.import_data, retries=10)
-    #     .partial(
-    #         weaviate_conn_id=_WEAVIATE_CONN_ID,
-    #         class_name=WEAVIATE_CLASS,
-    #         existing="upsert",
-    #         doc_key="docLink",
-    #         batch_params={"batch_size": 1000},
-    #         verbose=True,
-    #     )
-    #     .expand(dfs=[split_original_doc])
-    # )
+    _reupsert_original_doc = (
+        task(ingest.import_data, retries=10)
+        .partial(
+            weaviate_conn_id=_WEAVIATE_CONN_ID,
+            class_name=WEAVIATE_CLASS,
+            existing="upsert",
+            doc_key="docLink",
+            batch_params={"batch_size": 1000},
+            verbose=True,
+        )
+        .expand(dfs=[split_original_doc])
+    )
 
-    # _check_original_object = check_original_object(
-    #   original_doc=original_doc, 
-    #   doc_link=test_doc_link
-    # )
+    _check_original_object = check_original_object(
+      original_doc=original_doc, 
+      doc_link=test_doc_link
+    )
 
-    # _check_schema >> _generate_test_answers
-    # original_doc \
-    #     >> test_doc \
-    #         >> _upsert_test_doc \
-    #             >> _check_test_objects \
-    #                 >> _remove_test_objects \
-    #                     >> _upsert_original_doc \
-    #                         >> _check_original_object
+    _check_schema >> _results_file
+    _check_schema >> original_doc \
+        >> test_doc \
+            >> _upsert_test_doc \
+                >> _check_test_objects \
+                        >> _reupsert_original_doc \
+                            >> _check_original_object
     
     _download_test_questions >> _results_file
 
