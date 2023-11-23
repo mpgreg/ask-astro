@@ -61,8 +61,8 @@ def split_python(dfs: list[pd.DataFrame]) -> pd.DataFrame:
 
 def split_html(dfs: list[pd.DataFrame]) -> pd.DataFrame:
     """
-    This task concatenates multiple dataframes from upstream dynamic tasks and splits html code before importing
-    to a vector database.
+    This task concatenates multiple dataframes from upstream dynamic tasks and splits the content first with an 
+    html splitter and then with a text splitter.
 
     :param dfs: A list of dataframes from downstream dynamic tasks
     :return: A dataframe 
