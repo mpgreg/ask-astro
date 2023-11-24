@@ -12,7 +12,7 @@ from airflow.decorators import dag, task
 # from airflow.providers.weaviate.hooks.weaviate import WeaviateHook
 from include.utils.weaviate.hooks.weaviate import _WeaviateHook
 
-seed_baseline_url = None #'https://astronomer-demos-public-readonly.s3.us-west-2.amazonaws.com/ask-astro/baseline_data_v5.parquet'
+seed_baseline_url = None
 
 ask_astro_env = os.environ.get("ASK_ASTRO_ENV", "local")
 
@@ -24,6 +24,8 @@ weaviate_hook = _WeaviateHook(_WEAVIATE_CONN_ID)
 weaviate_client = weaviate_hook.get_client()
 
 markdown_docs_sources = [
+    {"doc_dir": "airflow_client/docs", "repo_base": "apache/airflow-client-python"},
+    {"doc_dir": "airflow/docs", "repo_base": "apache/airflow-client-go"},
     {"doc_dir": "", "repo_base": "OpenLineage/docs"},
     {"doc_dir": "", "repo_base": "OpenLineage/OpenLineage"},
 ]
@@ -69,7 +71,46 @@ html_docs_sources = [
         "container_class": "theme-doc-markdown markdown"
     },
     {
-        "base_url": "https://airflow.apache.org/docs/",
+        "base_url": "https://airflow.apache.org/docs/apache-airflow/stable/",
+        "exclude_docs": [
+            r"/changelog.html",
+            r"/commits.html",
+            r"_api",
+            r"_modules",
+            r"apache-airflow/1.",
+            r"apache-airflow/2.",
+            r"example",
+        ],
+        "container_class": "body"
+    },
+    {
+        "base_url": "https://airflow.apache.org/docs/apache-airflow-providers/",
+        "exclude_docs": [
+            r"/changelog.html",
+            r"/commits.html",
+            r"_api",
+            r"_modules",
+            r"apache-airflow/1.",
+            r"apache-airflow/2.",
+            r"example",
+        ],
+        "container_class": "body"
+    },
+    {
+        "base_url": "https://airflow.apache.org/docs/docker-stack/",
+        "exclude_docs": [
+            r"/changelog.html",
+            r"/commits.html",
+            r"_api",
+            r"_modules",
+            r"apache-airflow/1.",
+            r"apache-airflow/2.",
+            r"example",
+        ],
+        "container_class": "body"
+    },
+    {
+        "base_url": "https://airflow.apache.org/docs/helm-chart/stable/",
         "exclude_docs": [
             r"/changelog.html",
             r"/commits.html",
@@ -337,10 +378,10 @@ def ask_astro_load_bulk():
             weaviate_conn_id=_WEAVIATE_CONN_ID,
             seed_baseline_url=seed_baseline_url,
             class_name=WEAVIATE_CLASS,
-            existing="skip",
+            existing="error",
             uuid_column="id",
             vector_column="vector",
-            batch_params={"batch_size": 1000},
+            batch_params={"batch_size": 200},
             verbose=True,
         )
     )

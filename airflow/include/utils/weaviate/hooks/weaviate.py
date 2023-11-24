@@ -92,7 +92,8 @@ class _WeaviateHook(WeaviateHook):
         Creates or updates the schema in Weaviate based on the given class objects.
 
         :param class_objects: A list of class objects for schema creation or update.
-        :param existing: Strategy to handle existing classes ('ignore' or 'replace'). Defaults to 'ignore'.
+        :param existing: Strategy to handle existing classes ('replace' or 'error'). 
+        Defaults to 'error'.
         """
         for class_object in class_objects:
             class_name = class_object.get("class", "")
@@ -103,7 +104,12 @@ class _WeaviateHook(WeaviateHook):
             except Exception as e:
                 self.logger.error(f"Error retrieving current class schema: {e}")
                 current_class = None
-            if current_class is not None and existing == "replace":
+            
+            if current_class and existing == "error":
+                self.logger.error(f"Failed to create schema.  Class {class_name} already exists.")
+                raise AirflowException(f"Failed to create schema.  Class {class_name} already exists.")
+            
+            elif current_class is not None and existing == "replace":
                 self.logger.info(f"Replacing existing class {class_name}")
                 self.client.schema.delete_class(class_name=class_name)
 
@@ -210,101 +216,108 @@ class _WeaviateHook(WeaviateHook):
         uuid_column: str,
         existing: str,
         vector_column: str | None = None,
+        tenant: str | None = None,
         batch_params: dict = {},
         verbose: bool = False,
+        
     ) -> (list, Any):
         """
-        Processes the DataFrame and batches the data for ingestion into Weaviate.
+        Processes the DataFrame and batches the data for ingestion into Weaviate.  Ingest in cludes 
+        a callback function to handle (upsert, rollback, etc.) errors in batch ingest. If a user sets
+        'callback' in batch_params the user expected to handle these errors.
 
         :param df: DataFrame containing the data to be ingested.
         :param class_name: The name of the class in Weaviate to which data will be ingested.
         :param uuid_column: Name of the column containing the UUID.
         :param vector_column: Name of the column containing the vector data.
+        :param tenant:  The tenant to which the object will be added.
         :param batch_params: Parameters for batch configuration.
-        :param existing: Strategy to handle existing data ('skip', 'replace', 'upsert').
-        :param verbose: Whether to print verbose output.
+        :param existing: Strategy to handle existing data ('skip', 'replace', 'upsert' or 'error').
+        :param verbose: Whether to log verbose output.
         :return: List of any objects that failed to be added to the batch.
         """
-        batch = self.client.batch.configure(**batch_params)
-        batch_errors = []
 
-        for row_id, row in df.iterrows():
+        if not batch_params.get("callback"):
+            batch_params.update({"callback": self.process_batch_errors})
+
+        self.client.batch.configure(**batch_params)
+        self.batch_errors = []
+
+        with self.client.batch as batch:
+            for row_id, row in df.iterrows():
+                
+                data_object = row.to_dict()
+                uuid = data_object.pop(uuid_column)
+                vector = data_object.pop(vector_column, None)
+
+                try:
+                    if self.client.data_object.exists(uuid=uuid, class_name=class_name, tenant=tenant) is True:
+                        if existing == "error":
+                            raise AirflowException(f"Ingest of UUID {uuid} failed.  Object exists.")
+                        elif existing == "skip":
+                            if verbose is True:
+                                self.logger.info(f"UUID {uuid} exists.  Skipping.")
+                            continue
+                        elif existing == "replace":
+                            # Default for weaviate is replace existing
+                            if verbose is True:
+                                self.logger.info(f"UUID {uuid} exists.  Overwriting.")
             
-            data_object = row.to_dict()
-            uuid = data_object.pop(uuid_column)
-            vector = data_object.pop(vector_column, None)
-
-            try:
-                if self.client.data_object.exists(uuid=uuid, class_name=class_name) is True:
-                    if existing == "skip":
-                        if verbose is True:
-                            self.logger.info(f"UUID {uuid} exists.  Skipping.")
+                except Exception as e:
+                    if isinstance(e, AirflowException):
+                        self.logger.error(e)
+                        self.batch_errors.append({"uuid": uuid, "errors": [str(e)]})
+                        break
+                    else:
+                        self.logger.error(f"Failed to add row {row_id} with UUID {uuid}. Error: {e}")
+                        self.batch_errors.append({"uuid": uuid, "errors": [str(e)]})
                         continue
-                    elif existing == "replace":
-                        # Default for weaviate is replace existing
-                        if verbose is True:
-                            self.logger.info(f"UUID {uuid} exists.  Overwriting.")
+            
+                try:
+                    added_row = batch.add_data_object(
+                        class_name=class_name, uuid=uuid, data_object=data_object, vector=vector, tenant=tenant
+                        )
+                    if verbose is True:
+                        self.logger.info(f"Added row {row_id} with UUID {added_row} for batch import.")
         
-            except Exception as e:
-                if verbose:
-                    self.logger.error(f"Failed to add row {row_id} with UUID {uuid}. Error: {e}")
-                batch_errors.append({"uuid": uuid, "errors": [str(e)]})
-                continue
-        
-            try:
-                added_row = batch.add_data_object(
-                    class_name=class_name, uuid=uuid, data_object=data_object, vector=vector
-                    )
-                if verbose is True:
-                    self.logger.info(f"Added row {row_id} with UUID {added_row} for batch import.")
-    
-            except Exception as e:
-                if verbose:
-                    self.logger.error(f"Failed to add row {row_id} with UUID {uuid}. Error: {e}")
-                batch_errors.append({"uuid": uuid, "errors": [str(e)]})
-        
-        results = batch.create_objects()
+                except Exception as e:
+                    if verbose:
+                        self.logger.error(f"Failed to add row {row_id} with UUID {uuid}. Error: {e}")
+                    self.batch_errors.append({"uuid": uuid, "errors": [str(e)]})
+                
+        return self.batch_errors
 
-        if len(results) > 0:
-            batch_errors += self.process_batch_errors(results=results, verbose=verbose)
-        
-        return batch_errors
-
-    def process_batch_errors(self, results: list, verbose: bool) -> list:
+    def process_batch_errors(self, batch_results: list):
         """
-        Processes the results from batch operation and collects any errors.
+        Processes the results from batch operation.  Used as a callback to batch context manager.
 
         :param results: Results from the batch operation.
-        :param verbose: Flag to enable verbose logging.
-        :return: List of error messages.
         """
-        errors = []
-        for item in results:
+        for item in batch_results:
             if "errors" in item["result"]:
                 item_error = {"uuid": item["id"], "errors": item["result"]["errors"]}
-                if verbose:
-                    self.logger.info(item_error)
-                errors.append(item_error)
-        return errors
+                self.batch_errors.append(item_error)
 
     def handle_upsert_rollback(
             self, 
             objects_to_upsert: pd.DataFrame, 
-            batch_errors: list, 
             class_name: str, 
-            verbose: bool
-        ) -> list:
+            verbose: bool,
+            tenant: str | None = None
+        ) -> (list, list):
         """
         Handles rollback of inserts in case of errors during upsert operation.
 
         :param objects_to_upsert: Dictionary of objects to upsert.
         :param class_name: Name of the class in Weaviate.
+        :param tenant:  The tenant to which the object will be added.
         :param verbose: Flag to enable verbose logging.
-        :return: List of errors that occurred during rollback.
+        :return: List of errors that occurred during rollback and a list of objects for docs that 
+            successfully ingested to be deleted downstream.
         """
         rollback_errors = []
 
-        error_uuids = {error['uuid'] for error in batch_errors}
+        error_uuids = {error['uuid'] for error in self.batch_errors}
 
         objects_to_upsert['rollback_doc'] = objects_to_upsert\
                                                 .objects_to_insert\
@@ -322,26 +335,52 @@ class _WeaviateHook(WeaviateHook):
 
         for uuid in rollback_objects:
             try: 
-                if self.client.data_object.exists(uuid=uuid, class_name=class_name):
+                if self.client.data_object.exists(uuid=uuid, class_name=class_name, tenant=tenant):
                     self.logger.info(f"Removing id {uuid} for rollback.")
-                    self.client.data_object.delete(uuid=uuid, class_name=class_name, consistency_level="ALL")
+                    self.client.data_object.delete(
+                        uuid=uuid, class_name=class_name, tenant=tenant, consistency_level="ALL"
+                        )
                 elif verbose:
                     self.logger.info(f"UUID {uuid} does not exist. Skipping deletion during rollback.")
             except Exception as e:
                 rollback_errors.append({"uuid": uuid, "errors": [str(e)]})
 
-        for uuid in delete_objects:
+        return (rollback_errors, delete_objects)
+    
+    def handle_successful_upsert(
+            self, 
+            objects_to_remove: list,
+            class_name: str, 
+            verbose: bool,
+            tenant: str | None = None
+        ) -> list:
+        """
+        Handles removal of previous objects after successful upsert.
+
+        :param class_name: Name of the class in Weaviate.
+        :param objects_to_remove: If there were errors rollback will generate a list of 
+            successfully inserted objects.  If not set, assume all objects inserted successfully and delete
+            all objects_to_upsert['objects_to_delete']
+        :param tenant:  The tenant to which the object will be added.
+        :param verbose: Flag to enable verbose logging.
+        :return: List of errors that occurred during rollback.
+        """
+        removal_errors = []
+        
+        for uuid in objects_to_remove:
             try: 
-                if self.client.data_object.exists(uuid=uuid, class_name=class_name):
+                if self.client.data_object.exists(uuid=uuid, class_name=class_name, tenant=tenant):
                     if verbose:
                         self.logger.info(f"Deleting id {uuid} for successful upsert.")
-                    self.client.data_object.delete(uuid=uuid, class_name=class_name)
+                    self.client.data_object.delete(
+                        uuid=uuid, class_name=class_name, tenant=tenant, consistency_level='ALL'
+                        )
                 elif verbose:
                     self.logger.info(f"UUID {uuid} does not exist. Skipping deletion.")
             except Exception as e:
-                rollback_errors.append({"uuid": uuid, "errors": [str(e)]})
+                removal_errors.append({"uuid": uuid, "errors": [str(e)]})
 
-        return rollback_errors
+        return removal_errors
 
     def ingest_data(
         self,
@@ -353,6 +392,8 @@ class _WeaviateHook(WeaviateHook):
         vector_column: str = None,
         batch_params: dict = {},
         verbose: bool = True,
+        tenant: str | None = None,
+        error_threshold: int = 0,
     ) -> list:
         """
         This function ingests df to Weaviate and returns a list of any objects that failed to import.
@@ -368,18 +409,27 @@ class _WeaviateHook(WeaviateHook):
 
         :param df: A pandas dataframes
         :param class_name: The name of the class to import data.  Class should be created with weaviate schema.
-        :param existing: Whether to 'upsert', 'skip' or 'replace' any existing documents.  Default is 'skip'.
+        :param existing: Whether to 'upsert', 'skip', 'replace' or 'error' on any existing documents.  
+            Default is 'skip'.
         :param doc_key: If using upsert you must specify a doc_key as a column of the dataframe which uniquely 
         identifies a document which may or may not consist of multiple (unique) chunks.
         :param vector_column: For pre-embedded data specify the name of the column containing the embedding vector
         :param uuid_column: For data with pre-generated UUID specify the name of the column containing the UUID. If a
             uuid_column is not specified the method will attempt to create and generate UUIDs.
         :param batch_params: Additional parameters to pass to the weaviate batch configuration
-        :param verbose: Whether to print verbose output
+        :param verbose: Whether to log verbose output
+        :param tenant:  The tenant to which the object will be added.
+        :param error_threshold: Error threshold for imported objects.
+            0: (default) Fail if any objects have errors on import.
+            <N>: Fail if more than N objects have errors on import.
         :return: A list of object insert errors, if any.
         """
 
-        if existing not in ["skip", "replace", "upsert"]:
+        if error_threshold < 0:
+            self.logger.error("error_threshold must be >= 0")
+            raise AirflowException("error_threshold must be >= 0")
+
+        if existing not in ["skip", "replace", "upsert", "error"]:
             self.logger.error("Invalid parameter for 'existing'. Choices are 'skip', 'replace', 'upsert'")
             raise AirflowException("Invalid parameter for 'existing'. Choices are 'skip', 'replace', 'upsert'")
 
@@ -400,32 +450,49 @@ class _WeaviateHook(WeaviateHook):
 
         self.logger.info(f"Passing {len(df)} objects for ingest.")
 
-        batch_errors = self.batch_ingest(
+        self.batch_ingest(
             df=df,
             class_name=class_name,
             uuid_column=uuid_column,
             vector_column=vector_column,
             batch_params=batch_params,
             existing=existing,
-            verbose=True
+            verbose=True,
+            tenant=tenant
         )
 
-        if existing == "upsert" and len(batch_errors) > 0:
-            self.logger.warning("Error during upsert. Rolling back all inserts for docs with errors.")
-            rollback_errors = self.handle_upsert_rollback(
-                objects_to_upsert=objects_to_upsert, 
-                batch_errors=batch_errors, 
-                class_name=class_name, 
-                verbose=verbose
-                )
+        if existing == "upsert":
+            if len(self.batch_errors) > 0:
+                self.logger.warning("Error during upsert. Rolling back all inserts for docs with errors.")
 
-            if len(rollback_errors) > 0:
-                self.logger.error("Errors encountered during rollback.")
-                raise AirflowException("Errors encountered during rollback.")
+                rollback_errors, objects_to_remove = self.handle_upsert_rollback(
+                    objects_to_upsert=objects_to_upsert, class_name=class_name, verbose=verbose)
+                
+                removal_errors = self.handle_successful_upsert(
+                    objects_to_remove=objects_to_remove, class_name=class_name, verbose=verbose
+                    )
 
-        if len(batch_errors) > 0:
-            self.logger.error("Errors encountered during ingest.")
-            raise AirflowException("Errors encountered during ingest.")
+                rollback_errors+=removal_errors
+
+                if len(rollback_errors) > error_threshold:
+                    raise AirflowException(f"Errors encountered during rollback. \n\n{rollback_errors}")
+                elif len(rollback_errors) > 0:
+                    self.logger.error(f"Errors encountered during rollback. \n\n{rollback_errors}")
+                    return self.batch_errors + rollback_errors
+            else:
+                removal_errors = self.handle_successful_upsert(
+                    objects_to_remove={
+                        item for sublist in objects_to_upsert.objects_to_delete for item in sublist
+                        }, 
+                    class_name=class_name, 
+                    verbose=verbose
+                    )
+
+        if len(self.batch_errors) > error_threshold:
+                raise AirflowException(f"Errors encountered during ingest. \n\n{self.batch_errors}")
+        elif len(self.batch_errors) > 0:
+            [self.logger.error(error) for error in self.batch_errors]
+            return self.batch_errors
 
     def _query_objects(self, value: Any, doc_key: str, class_name: str, uuid_column: str) -> set:
         """

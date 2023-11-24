@@ -85,8 +85,6 @@ def import_baseline(
     :param uuid_column: For data with pre-genenerated UUID specify the name of the column containing the UUID
     """
     
-    weaviate_hook = _WeaviateHook(weaviate_conn_id)
-
     seed_filename = f"include/data/{seed_baseline_url.split('/')[-1]}"
 
     try:

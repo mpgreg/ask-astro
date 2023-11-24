@@ -5,22 +5,20 @@ from pathlib import Path
 
 import pandas as pd
 
-from include.tasks import ingest, split
+from include.tasks import ingest
 from include.tasks.utils.retrieval_tests import weaviate_qna, generate_crc, generate_hybrid_crc
-from include.tasks.utils.schema import check_schema_subset
 
 from airflow.decorators import dag, task
+from airflow.exceptions import AirflowException
 from airflow.providers.google.cloud.transfers.local_to_gcs import LocalFilesystemToGCSOperator
 from airflow.providers.google.cloud.transfers.gcs_to_local import GCSToLocalFilesystemOperator
 from airflow.providers.google.suite.operators.sheets import GoogleSheetsCreateSpreadsheetOperator
 # from airflow.providers.weaviate.hooks.weaviate import WeaviateHook
 from include.utils.weaviate.hooks.weaviate import _WeaviateHook
-from airflow.operators.python import get_current_context
-from weaviate.exceptions import UnexpectedStatusCodeException
 
 ask_astro_env = os.environ.get("ASK_ASTRO_ENV", "")
 
-WEAVIATE_CLASS = os.environ.get("WEAVIATE_CLASS", "DocsProd")
+WEAVIATE_CLASS = os.environ.get("WEAVIATE_CLASS", "DocsLocal")
 
 _WEAVIATE_CONN_ID = os.environ.get("WEAVIATE_CONN_ID", f"weaviate_{ask_astro_env}")
 _GCP_CONN_ID = 'google_cloud_default'
@@ -34,18 +32,10 @@ results_bucket = 'ask-astro-test-results'
 results_bucket_prefix = 'test_pipeline/'
 
 seed_baseline_url = (
-    "https://astronomer-demos-public-readonly.s3.us-west-2.amazonaws.com/ask-astro/baseline_data_v3.parquet"
+    "https://astronomer-demos-public-readonly.s3.us-west-2.amazonaws.com/ask-astro/baseline_data_v4.parquet"
 )
-
-test_doc_link = "https://registry.astronomer.io/providers/apache-airflow/versions/2.7.3/modules/SmoothOperator"
-
-test_doc_chunk1 = "# TEST TITLE\n## TEST SECTION\n" + "".join(["TEST " for a in range(0, 400)])
-test_doc_chunk2 = "".join(["TEST " for a in range(0, 400)])
-test_doc_content = "\n\n".join([test_doc_chunk1, test_doc_chunk2])
-
-
 @dag(schedule_interval=None, start_date=datetime(2023, 9, 27), catchup=False, is_paused_upon_creation=True)
-def test_ask_astro_load_baseline():
+def test_retrieval():
     """
     This DAG performs a test of the initial load of data from sources from a seed baseline.  
 
@@ -77,98 +67,40 @@ def test_ask_astro_load_baseline():
 
         return class_objects
 
-    @task.branch
+    @task.branch(trigger_rule="none_failed")
     def check_schema(class_objects: dict) -> str:
         """
         Check if the current schema includes the requested schema.  The current schema could be a superset
         so check_schema_subset is used recursively to check that all objects in the requested schema are
         represented in the current schema.
         """
-
-        return (
-            ["get_existing_doc", "create_test_object"]
-            if weaviate_hook.check_schema(class_objects=class_objects)
-            else None
-        )
+        
+        if weaviate_hook.check_schema(class_objects=class_objects):
+            return {"check_doc_count"}
+        else:
+            raise AirflowException(f"""
+                Class does not exist in current schema. Create it with 
+                'weaviate_hook.create_schema(class_objects=class_objects, existing="error")'
+                """)
     
-    @task()
-    def get_existing_doc(doc_link:str) -> list[pd.DataFrame]:
+    @task.branch(trigger_rule="none_failed")
+    def check_doc_count(class_objects: dict, expected_count: int) -> str:
         """
-        Import an existing document that was added from the baseline ingest.
+        Check if the vectordb has AT LEAST expected_count objects.
         """
+        
+        count = weaviate_hook.client.query.aggregate(WEAVIATE_CLASS).with_meta_count().do()
+        doc_count = count['data']['Aggregate'][WEAVIATE_CLASS][0]['meta']['count']
 
-        existing_doc = (
-            weaviate_client.query.get(properties=["docSource", "sha", "content", "docLink"], 
-                                      class_name=WEAVIATE_CLASS)
-            .with_limit(1)
-            .with_additional(["id", "vector"])
-            .with_where({"path": ["docLink"], "operator": "Equal", "valueText": doc_link})
-            .do()
-        )
-
-        existing_doc = pd.DataFrame(existing_doc["data"]["Get"][WEAVIATE_CLASS])
-        existing_doc.drop("_additional", axis=1, inplace=True)
-
-        return [existing_doc]
-
-    @task()
-    def create_test_object(original_doc: list[pd.DataFrame]) -> list[pd.DataFrame]:
-        """
-        Create a test object with known data with sufficient size to be split into two chunks.
-        """
-        new_doc = original_doc[0][["docSource", "sha", "content", "docLink"]]
-        new_doc["content"] = test_doc_content
-
-        return [new_doc]
-
-    @task()
-    def check_test_objects(original_doc: list[pd.DataFrame], doc_link:str) -> None:
-        """
-        Check the upserted doc against expected.
-        """
-
-        new_docs = (
-            weaviate_client.query.get(properties=["docSource", "sha", "content", "docLink"], 
-                                      class_name=WEAVIATE_CLASS)
-            .with_limit(10)
-            .with_additional(["id", "vector"])
-            .with_where({"path": ["docLink"], "operator": "Equal", "valueText": doc_link})
-            .do()
-        )
-
-        new_docs = new_docs["data"]["Get"][WEAVIATE_CLASS]
-
-        assert len(new_docs) == 2
-
-        assert new_docs[0]["content"] + " " == test_doc_chunk1 or new_docs[0]["content"] + " " == test_doc_chunk2
-
-        assert new_docs[1]["content"] + " " == test_doc_chunk1 or new_docs[1]["content"] + " " == test_doc_chunk2
-
-        assert new_docs[0]["docLink"] == original_doc[0].docLink[0]
-        assert new_docs[0]["docSource"] == original_doc[0].docSource[0]
-
-    @task()
-    def check_original_object(original_doc: list[pd.DataFrame], doc_link:str) -> None:
-        """
-        Check the re-upserted doc against original.
-        """
-
-        new_docs = (
-            weaviate_client.query.get(properties=["docSource", "sha", "content", "docLink"], 
-                                      class_name=WEAVIATE_CLASS)
-            .with_limit(10)
-            .with_additional(["id", "vector"])
-            .with_where({"path": ["docLink"], "operator": "Equal", "valueText": doc_link})
-            .do()
-        )
-
-        new_docs = new_docs["data"]["Get"][WEAVIATE_CLASS]
-
-        assert len(new_docs) == 1
-
-        print(original_doc[0].to_json())
-
+        if doc_count >= expected_count:
+            return {"download_test_questions"}
+        elif doc_count == 0:
+            return {"import_baseline"}
+        else:
+            raise AirflowException("Unknown vectordb state. Ingest baseline or change expected_count.")
+    
     _download_test_questions = GCSToLocalFilesystemOperator(
+        trigger_rule="none_failed",
         task_id="download_test_questions",
         gcp_conn_id=_GCP_CONN_ID,
         object_name=results_bucket_prefix + test_question_template_path.parts[-1],
@@ -230,7 +162,7 @@ def test_ask_astro_load_baseline():
 
     _results_file = generate_test_answers(test_question_template_path=test_question_template_path)
 
-    LocalFilesystemToGCSOperator(
+    _upload_results = LocalFilesystemToGCSOperator(
         task_id='upload_results',
         gcp_conn_id=_GCP_CONN_ID,
         src=_results_file,
@@ -244,59 +176,25 @@ def test_ask_astro_load_baseline():
     #     spreadsheet={}
     # )
 
+    _import_baseline = (
+        task(ingest.import_baseline, trigger_rule="none_failed")(
+            weaviate_conn_id=_WEAVIATE_CONN_ID,
+            seed_baseline_url=seed_baseline_url,
+            class_name=WEAVIATE_CLASS,
+            existing="error",
+            uuid_column="id",
+            vector_column="vector",
+            batch_params={"batch_size": 1000},
+            verbose=True,
+        )
+    )
+
     _get_schema = get_schema()
     _check_schema = check_schema(class_objects=_get_schema)
-    original_doc = get_existing_doc(doc_link=test_doc_link)
-    test_doc = create_test_object(original_doc)
+    _check_doc_count = check_doc_count(class_objects=_get_schema, expected_count=36860)
 
-    split_test_doc = task(split.split_markdown).expand(dfs=[test_doc])
-
-    _upsert_test_doc = (
-        task(ingest.import_data, retries=10)
-        .partial(
-            weaviate_conn_id=_WEAVIATE_CONN_ID,
-            class_name=WEAVIATE_CLASS,
-            existing="upsert",
-            doc_key="docLink",
-            batch_params={"batch_size": 1000},
-            verbose=True,
-        )
-        .expand(dfs=[split_test_doc])
-    )
-
-    _check_test_objects = check_test_objects(
-      original_doc=original_doc, 
-      doc_link=test_doc_link
-    )
-
-    split_original_doc = task(split.split_markdown).expand(dfs=[original_doc])
-
-    _reupsert_original_doc = (
-        task(ingest.import_data, retries=10)
-        .partial(
-            weaviate_conn_id=_WEAVIATE_CONN_ID,
-            class_name=WEAVIATE_CLASS,
-            existing="upsert",
-            doc_key="docLink",
-            batch_params={"batch_size": 1000},
-            verbose=True,
-        )
-        .expand(dfs=[split_original_doc])
-    )
-
-    _check_original_object = check_original_object(
-      original_doc=original_doc, 
-      doc_link=test_doc_link
-    )
-
-    _check_schema >> _results_file
-    _check_schema >> original_doc \
-        >> test_doc \
-            >> _upsert_test_doc \
-                >> _check_test_objects \
-                        >> _reupsert_original_doc \
-                            >> _check_original_object
+    _check_schema >> _check_doc_count >> [_import_baseline, _download_test_questions]
     
-    _download_test_questions >> _results_file
+    _import_baseline >> _download_test_questions >> _results_file >> _upload_results
 
-test_ask_astro_load_baseline()
+test_retrieval()
