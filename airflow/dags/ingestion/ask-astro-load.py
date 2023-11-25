@@ -136,6 +136,17 @@ stackoverflow_tags = [
             ]
     }
 ]
+discourse_sources = [
+    {
+        "base_url": "https://forum.astronomer.io",
+        "trust_level_cutoff": 3,
+        "exclude_categories": [
+            {'name': 'Site Feedback', 'id': 3},
+            {'name': 'Nebula', 'id': 6},
+            {'name': 'Software', 'id': 5},
+            ]
+     }
+]
 
 default_args = {"retries": 3, "retry_delay": 30}
 
@@ -207,6 +218,7 @@ def ask_astro_load_bulk():
             return {
                 "extract_github_markdown",
                 "extract_html",
+                "extract_html_discourse",
                 "extract_stack_overflow_archive",
                 "extract_slack_archive",
                 "extract_astro_registry_cell_types",
@@ -259,6 +271,22 @@ def ask_astro_load_bulk():
 
         return df
 
+    @task(trigger_rule="none_failed")
+    def extract_html_discourse(source: dict):
+        
+        url_parts = urllib.parse.urlparse(source['base_url'])
+        
+        parquet_file = Path(f"include/data/html/{url_parts.netloc}"+"/discourse.parquet")
+        parquet_file.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            df = pd.read_parquet(parquet_file)
+        except Exception:
+            df = html.extract_html_discourse(source=source)[0]
+            df.to_parquet(parquet_file)
+
+        return df
+  
     @task(trigger_rule="none_failed")
     def extract_stack_overflow_archive(tag: dict):
 
@@ -335,6 +363,7 @@ def ask_astro_load_bulk():
     slack_docs = extract_slack_archive.expand(source=slack_channel_sources)
     registry_cells_docs = extract_astro_registry_cell_types()
     html_docs = extract_html.expand(source=html_docs_sources)
+    html_discourse_docs = extract_html_discourse.expand(source=discourse_sources)
     registry_dags_docs = extract_astro_registry_dags()
     code_samples = extract_github_python.expand(source=code_samples_sources)
 
@@ -351,7 +380,7 @@ def ask_astro_load_bulk():
         registry_cells_docs
     ]
 
-    html_tasks = [html_docs]
+    html_tasks = [html_docs, html_discourse_docs]
 
     python_code_tasks = [registry_dags_docs, code_samples]
 

@@ -52,6 +52,19 @@ html_docs_sources = [
     }
 ]
 
+discourse_sources = [
+    {
+        "base_url": "https://forum.astronomer.io",
+        "trust_level_cutoff": 3,
+        "exclude_categories": [
+            {'name': 'Site Feedback', 'id': 3},
+            {'name': 'Nebula', 'id': 6},
+            {'name': 'Software', 'id': 5},
+            ]
+     }
+]
+
+
 default_args = {"retries": 3, "retry_delay": 30}
 
 schedule_interval = "0 5 * * *" if ask_astro_env == "prod" else None
@@ -72,8 +85,9 @@ def ask_astro_load_html():
     """
 
     extracted_html_docs = task(html.extract_html).expand(source=html_docs_sources)
+    extracted_html_discourse_docs = task(html.extract_html).expand(source=discourse_sources)
 
-    split_html_docs = task(split.split_html).expand(dfs=extracted_html_docs)
+    split_html_docs = task(split.split_html).expand(dfs=extracted_html_docs + extracted_html_discourse_docs)
 
     _import_data = (
         task(ingest.import_data, retries=10)

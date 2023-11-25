@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import urllib.parse
 from time import sleep
 import requests
@@ -29,7 +28,8 @@ def get_links(url: str, url_base: str) -> set:
             links.add(link_url)
         elif not link_url.startswith(("http", "#")) and link_url != '/':
             absolute_url = urllib.parse.urljoin(url, link_url)
-            links.add(absolute_url.split("#")[0])
+            if absolute_url.startswith(url_base):
+                links.add(absolute_url)
 
     links = {link for link in links if not link.endswith(('.xml'))}
     links = {link.split('?')[0] for link in links}
