@@ -6,7 +6,13 @@ from pathlib import Path
 import pandas as pd
 
 from include.tasks import ingest
-from include.tasks.utils.retrieval_tests import weaviate_qna, generate_crc, generate_hybrid_crc
+from include.tasks.utils.retrieval_tests import (
+    generate_weaviate_qna, 
+    generate_crc, 
+    generate_hybrid_crc, 
+    weaviate_hybrid,
+    weaviate_search
+)
 
 from airflow.decorators import dag, task
 from airflow.exceptions import AirflowException
@@ -28,12 +34,17 @@ weaviate_client = weaviate_hook.get_client()
 
 test_question_template_path = Path("include/data/test_questions_template.csv")
 
+hybrid_alpha = .4
+question_number_subset = {14, 19, 21, 29, 32, 38, 50, 52}
+
 results_bucket = 'ask-astro-test-results'
 results_bucket_prefix = 'test_pipeline/'
 
 seed_baseline_url = (
     "https://astronomer-demos-public-readonly.s3.us-west-2.amazonaws.com/ask-astro/baseline_data_v4.parquet"
 )
+
+
 @dag(schedule_interval=None, start_date=datetime(2023, 9, 27), catchup=False, is_paused_upon_creation=True)
 def test_retrieval():
     """
@@ -122,39 +133,68 @@ def test_retrieval():
             'test_number',
             'question',
             'expected_references',
-            'vectordb_answer',
-            'vectordb_references',
-            'crc_answer',
-            'crc_references',
+            f'hybrid_references_alpha{hybrid_alpha}',
+            'weaviate_search_references',
+            f'hybrid_mqr_crc_answer_alpha{hybrid_alpha}',
+            'hybrid_mqr_crc_references',
+            'hybrid_langsmith_link',
+            'weaviate_qna_answer',
+            'weaviate_qna_references',
+            'langchain_mqr_crc_answer',
+            'langchain_mqr_crc_references',
             'langsmith_link',
-            'hybrid_crc_answer',
-            'hybrid_crc_references',
-            'hybrid_langsmith_link'
         ]
 
         questions_df=pd.read_csv(test_question_template_path)
 
-        questions_df[["vectordb_answer", "vectordb_references"]] = questions_df\
-            .question.apply(lambda x: weaviate_qna(
+        if question_number_subset: 
+            questions_df = questions_df[questions_df.test_number.isin(question_number_subset)]
+
+        questions_df[f'hybrid_references_alpha{hybrid_alpha}'] = questions_df\
+            .question.apply(lambda x: weaviate_hybrid(
+                weaviate_client=weaviate_client, 
+                question=x, 
+                alpha=hybrid_alpha,
+                class_name=WEAVIATE_CLASS))
+        
+        questions_df['weaviate_search_references'] = questions_df\
+            .question.apply(lambda x: weaviate_search(
                 weaviate_client=weaviate_client, 
                 question=x, 
                 class_name=WEAVIATE_CLASS))
-
-        questions_df[['crc_answer', 'crc_references', 'langsmith_link']] = questions_df\
-            .question.apply(lambda x: generate_crc(
-                weaviate_client=weaviate_client,
-                question=x,
-                class_name=WEAVIATE_CLASS,
-                ts_nodash=ts_nodash,
-                send_feedback=False))
         
-        questions_df[['hybrid_crc_answer', 'hybrid_crc_references', 'hybrid_langsmith_link']] = questions_df\
-            .question.apply(lambda x: generate_hybrid_crc(
+        questions_df[["weaviate_qna_answer", "weaviate_qna_references"]] = questions_df\
+            .question.apply(lambda x: pd.Series(generate_weaviate_qna(
+                weaviate_client=weaviate_client, 
+                question=x, 
+                class_name=WEAVIATE_CLASS)))
+
+        questions_df[[
+            'langchain_mqr_crc_answer', 
+            'langchain_mqr_crc_references', 
+            'langsmith_link'
+            ]] = questions_df\
+            .question.apply(lambda x: pd.Series(generate_crc(
                 weaviate_client=weaviate_client,
                 question=x,
                 class_name=WEAVIATE_CLASS,
                 ts_nodash=ts_nodash,
-                send_feedback=False))
+                send_feedback=False)))
+        
+        questions_df[[
+            f'hybrid_mqr_crc_answer_alpha{hybrid_alpha}', 
+            'hybrid_mqr_crc_references', 
+            'hybrid_langsmith_link'
+            ]] = questions_df\
+            .question.apply(lambda x: pd.Series(generate_hybrid_crc(
+                weaviate_client=weaviate_client,
+                question=x,
+                class_name=WEAVIATE_CLASS,
+                ts_nodash=ts_nodash,
+                send_feedback=False,
+                alpha=hybrid_alpha,
+                )
+            ))
         
         questions_df[csv_columns].to_csv(results_file, index=False)
 

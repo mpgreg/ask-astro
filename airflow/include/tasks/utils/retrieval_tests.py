@@ -20,11 +20,16 @@ from langchain.prompts import (
 
 from weaviate.client import Client as WeaviateClient
 
-def weaviate_qna(weaviate_client:WeaviateClient, question:str, class_name:str) -> pd.Series:
+def generate_weaviate_qna(weaviate_client:WeaviateClient, question:str, class_name:str) -> [str, str]:
     """
     This function uses Weaviate's  
     [QnA](https://weaviate.io/developers/weaviate/modules/reader-generator-modules/qna-openai) 
-    to answer questions and returns a pandas series of answers and reference documents used in the answer.
+    to answer questions.
+
+    :param weaviate_client: An instantiated weaviate client to use for the search.
+    :param question: A question.
+    :param class_name: The name of the class to search.
+    :return: A list of strings for answers and references
     """
 
     ask = {
@@ -42,7 +47,7 @@ def weaviate_qna(weaviate_client:WeaviateClient, question:str, class_name:str) -
                 ]
                 )\
             .with_ask(ask)\
-            .with_limit(3)\
+            .with_limit(5)\
             .with_additional(["certainty", "id", "distance"])\
             .do()['data']['Get'][class_name]
         
@@ -62,7 +67,81 @@ def weaviate_qna(weaviate_client:WeaviateClient, question:str, class_name:str) -
         answers=[]
         references=[]
     
-    return pd.Series([answers, references])
+    return [answers, references]
+
+def weaviate_search(weaviate_client:WeaviateClient, question:str, class_name:str) -> str:
+    """
+    This function uses Weaviate's  
+    [Similarity Search](https://weaviate.io/developers/weaviate/search/similarity) 
+    and returns a pandas series of reference documents.
+
+    :param weaviate_client: An instantiated weaviate client to use for the search.
+    :param question: A question.
+    :param class_name: The name of the class to search.
+    :return: A string of newline separated references with certainty level.
+    """
+
+    try:
+        results = weaviate_client.query.get(
+            class_name=class_name, 
+            properties=[
+                "docLink"
+                ])\
+            .with_near_text(
+                {
+                    "concepts": question, 
+                }
+                )\
+            .with_limit(5)\
+            .with_additional(["id", "certainty"])\
+            .do()['data']['Get'][class_name]
+    
+        references = "\n".join(
+            [
+                f"{result['docLink']} [{round(result['_additional']['certainty'], 3)}]" for result in results
+            ])
+
+    except Exception as e:
+        print(e)
+        references=[]
+    
+    return references
+
+def weaviate_hybrid(weaviate_client:WeaviateClient, question:str, class_name:str, alpha:int) -> str:
+    """
+    This function uses Weaviate's  
+    [Hybrid Search](https://weaviate.io/developers/weaviate/search/hybrid) 
+    and returns a pandas series of reference documents.
+
+    :param weaviate_client: An instantiated weaviate client to use for the search.
+    :param question: A question.
+    :param class_name: The name of the class to search.
+    :param alpha: The relative importance of bm25 search vs vector search. An alpha of 1 is a pure vector search.
+        An alpha of 0 is a pure keyword search. Default is 0.5.
+    :return: A string of newline separated references.    
+    """
+
+    try:
+        results = weaviate_client.query.get(
+            class_name=class_name, 
+            properties=[
+                "docLink"
+                ])\
+            .with_hybrid(
+                query= question, 
+                alpha=alpha,
+                )\
+            .with_limit(5)\
+            .with_additional(["id"])\
+            .do()['data']['Get'][class_name]
+    
+        references = "\n".join([result['docLink'] for result in results])
+
+    except Exception as e:
+        print(e)
+        references=[]
+    
+    return references
 
 def generate_crc(
         weaviate_client:WeaviateClient, 
@@ -70,17 +149,22 @@ def generate_crc(
         class_name:str, 
         ts_nodash:str,
         send_feedback:bool = False
-    ) -> pd.Series:
+    ) -> [str, str, str]:
     """
     This function uses LangChain's 
     [ConversationalRetrievalChain](https://api.python.langchain.com/en/latest/chains/langchain.chains.conversational_retrieval.base.ConversationalRetrievalChain.html)
     along with the 
     [MultiQueryRetriever](https://api.python.langchain.com/en/latest/retrievers/langchain.retrievers.multi_query.MultiQueryRetriever.html)
-    to answer a question with retrieval from the specified corpus (class_name) of documents in weaviate. The
-    results are uploaded to LangSmith with a metadata field request_id= "test_baseline".
+    to answer a question with retrieval from the specified corpus (class_name) of documents in weaviate. If 
+    send_feedback is set to true results are uploaded to LangSmith with a metadata field request_id= "test_baseline".
 
-    The function returns a pandas series of an answer, reference documents used to answer it and a link to 
-    the langsmith feedback.
+    :param weaviate_client: An instantiated weaviate client to use for the search.
+    :param question: A question.
+    :param class_name: The name of the class to search.
+    :param ts_nodash: A unix timestamp to associate with this result.  Used in constructing the langsmith feedback.
+        If not set Airflow will use the DAG run timestamp.
+    :param send_feedback: Whether to send feedback to LangSmith or not.  Default: False.
+    :return: A list of strings for answers, references, langsmith_links.
     """
 
     langsmith_link_template = "https://smith.langchain.com/o/{org}/projects/p/{project}?peek={feedback_id}"
@@ -165,15 +249,16 @@ def generate_crc(
         references=[]
         langsmith_link=''
     
-    return pd.Series([answers, references, langsmith_link])
+    return [answers, references, langsmith_link]
 
 def generate_hybrid_crc(
         weaviate_client:WeaviateClient, 
         question:str, 
         class_name:str, 
         ts_nodash:str,
+        alpha: int, 
         send_feedback:bool = False
-    ) -> pd.Series:
+    ) -> [str, str, str]:
     """
     This function uses LangChain's 
     [ConversationalRetrievalChain](https://api.python.langchain.com/en/latest/chains/langchain.chains.conversational_retrieval.base.ConversationalRetrievalChain.html)
@@ -185,6 +270,17 @@ def generate_hybrid_crc(
 
     The function returns a pandas series of an answer, reference documents used to answer it and a link to 
     the langsmith feedback.
+
+    :param weaviate_client: An instantiated weaviate client to use for the search.
+    :param question: A question.
+    :param class_name: The name of the class to search.
+    :param ts_nodash: A unix timestamp to associate with this result.  Used in constructing the langsmith feedback.
+        If not set Airflow will use the DAG run timestamp.
+    :param alpha: The relative importance of bm25 search vs vector search. An alpha of 1 is a pure vector search.
+        An alpha of 0 is a pure keyword search.
+    :param send_feedback: Whether to send feedback to LangSmith or not.  Default: False.
+    :return: A list of strings for answers, references, langsmith_links.
+
     """
 
     langsmith_link_template = "https://smith.langchain.com/o/{org}/projects/p/{project}?peek={feedback_id}"
@@ -206,6 +302,7 @@ def generate_hybrid_crc(
         client=weaviate_client,
         index_name=class_name,
         text_key='content',
+        alpha=alpha,
         attributes=['docLink'],
         create_schema_if_missing=True,
     )
@@ -270,4 +367,4 @@ def generate_hybrid_crc(
         references=[]
         langsmith_link=''
     
-    return pd.Series([answers, references, langsmith_link])
+    return [answers, references, langsmith_link]

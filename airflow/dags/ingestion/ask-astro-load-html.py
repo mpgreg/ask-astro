@@ -87,7 +87,7 @@ def ask_astro_load_html():
     extracted_html_docs = task(html.extract_html).expand(source=html_docs_sources)
     extracted_html_discourse_docs = task(html.extract_html).expand(source=discourse_sources)
 
-    split_html_docs = task(split.split_html).expand(dfs=extracted_html_docs + extracted_html_discourse_docs)
+    split_html_docs = task(split.split_html).expand(dfs=[extracted_html_docs, extracted_html_discourse_docs])
 
     _import_data = (
         task(ingest.import_data, retries=10)

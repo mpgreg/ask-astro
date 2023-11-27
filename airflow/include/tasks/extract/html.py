@@ -59,7 +59,29 @@ def extract_html(source: dict) -> list[pd.DataFrame]:
 
 def extract_html_discourse(source: dict) -> list[pd.DataFrame]:
     """
-    This function extracts json from a Discourse server endpoint.
+    This function extracts json from a Discourse server endpoint based on a source definition dictionary.
+
+    The source can specify categories (ie. Site Feedback) to exclude from extration.
+
+    After extracting posts from the discourse site some logic is applied to select "high-quality" posts 
+    based on:
+    - score: only topics with an initial thread with a score in the top quartile are kept.
+    - trust level: For all replies only posts >= the trust_level_cutoff are kept. 
+
+    All posts are grouped by topic and consolidated into a 'content' field.
+    
+    :param source: A dictionary of base_url, trust_level_cutoff, and exclude_categories. For example
+    {
+        "base_url": "https://forum.astronomer.io",
+        "trust_level_cutoff": 3,
+        "exclude_categories": [
+            {'name': 'Site Feedback', 'id': 3},
+            {'name': 'Nebula', 'id': 6},
+            {'name': 'Software', 'id': 5},
+            ]
+    }
+    :return: A pandas dataframe with 'content' and 'docLink'
+
     """
 
     post_columns = [
